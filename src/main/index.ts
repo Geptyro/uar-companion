@@ -693,9 +693,22 @@ async function toggleMyReady(): Promise<void> {
  * Heartbeats the SC2 presence to the site (contract agreed with the
  * website session; harmless 404s until POST /api/presence ships there).
  */
+/** What goes over the wire: the local pairs are resolved to `selfName`. */
+type PresenceBeat = Omit<SC2Presence, 'members'> & { selfName?: string };
+
 async function heartbeat(): Promise<void> {
-	if (!me || Date.now() < presenceMuteUntil) return;
-	const status = await sendPresence(server(), sc2);
+	const account = me;
+	if (!account || Date.now() < presenceMuteUntil) return;
+	let beat: PresenceBeat | null = null;
+	if (sc2) {
+		// tell the server which roster entry is us, so it can show the whole
+		// lobby/game and still mark the players it knows. The lobby file
+		// pairs profile names with account battletags — ours is the match.
+		const { members, ...rest } = sc2;
+		const selfName = members?.find((m) => m.battletag === account.battletag)?.profile;
+		beat = selfName ? { ...rest, selfName } : rest;
+	}
+	const status = await sendPresence(server(), beat);
 	if (status === 404) presenceMuteUntil = Date.now() + 60 * 60_000;
 }
 

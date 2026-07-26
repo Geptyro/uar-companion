@@ -114,6 +114,8 @@ export async function sendPresence(
 		displayTime?: number;
 		roster?: string[];
 		lobbyId?: number | null;
+		/** our own entry in `roster` (profile name), when known */
+		selfName?: string;
 	} | null
 ): Promise<number> {
 	try {

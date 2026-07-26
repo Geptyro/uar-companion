@@ -27,6 +27,8 @@ export interface SC2Presence {
 	 * (SC2 deletes the file when the game ends). Null when unavailable.
 	 */
 	lobbyId?: number | null;
+	/** (profile name#code, account battletag) pairs from the lobby file. */
+	members?: { profile: string; battletag: string }[];
 }
 
 interface UiResponse {
@@ -239,10 +241,17 @@ export function watchSC2(
 			if (eff) {
 				presence.lobbyId = eff.lobbyId;
 				if (!presence.uar) presence.uar = eff.uar;
-				if (presence.status === 'lobby' && eff.battletags.length > 0) {
-					presence.players = eff.battletags.length;
-					presence.roster = eff.battletags;
+				// lobby rosters use the in-game profile names, like the
+				// in-game roster does — consistent for the UI, and less
+				// exposing than the account battletags of people who never
+				// installed anything
+				const names = eff.members?.map((m) => m.profile) ?? eff.battletags;
+				if (presence.status === 'lobby' && names.length > 0) {
+					presence.players = names.length;
+					presence.roster = names;
 				}
+				// which roster entry is us: the pair carrying our battletag
+				presence.members = eff.members;
 			}
 		}
 		return presence;
