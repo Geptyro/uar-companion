@@ -40,4 +40,10 @@ magick build/icon.png -resize 512x512 -colorspace Gray -colorspace sRGB \
 	resources/icon-dev.png
 magick resources/icon-dev.png -define icon:auto-resize=256,128,64,48,32,16 \
 	resources/icon-dev.ico
-echo "dev icon written"
+# dev variants of every badge, so a dev tray icon never turns green
+for f in resources/badges/badge-*.png; do
+	magick "$f" -colorspace Gray -colorspace sRGB "${f%.png}-dev.png"
+	magick "${f%.png}-dev.png" -define icon:auto-resize=48,32,24,16 "${f%.png}-dev.ico"
+done
+
+echo "dev icon + dev badges written"

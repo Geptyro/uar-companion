@@ -405,7 +405,7 @@ function trayIconFor(badge: string | null): Electron.NativeImage {
 		return nativeImage.createFromPath(process.platform === 'win32' ? iconIco : iconPng);
 	}
 	return nativeImage.createFromPath(
-		join(import.meta.dirname, `../../resources/badges/badge-${badge}.${ext}`)
+		join(import.meta.dirname, `../../resources/badges/badge-${badge}${isDev ? '-dev' : ''}.${ext}`)
 	);
 }
 
@@ -423,6 +423,7 @@ function refreshTray(): void {
 	if (String(badge) !== lastTrayIconKey) {
 		lastTrayIconKey = String(badge);
 		tray.setImage(trayIconFor(badge));
+		log(`tray badge: ${badge ?? 'none'}`);
 	}
 	const status = watcher?.statusLine ?? 'Starting…';
 	const ready = readyState.ok ? String(readyState.count) : '–';
