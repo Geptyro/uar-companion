@@ -13,9 +13,9 @@
 		"start": "electron-vite preview",
 		"test": "node --test \"tests/*.test.ts\"",
 		"e2e": "bash tests/e2e.sh",
-		"dist:linux": "electron-vite build && electron-builder --linux",
-		"dist:win": "electron-vite build && electron-builder --win",
-		"dist:mac": "electron-vite build && electron-builder --mac",
+		"dist:linux": "electron-vite build && electron-builder --linux --publish never",
+		"dist:win": "electron-vite build && electron-builder --win --publish never",
+		"dist:mac": "electron-vite build && electron-builder --mac --publish never",
 		"link:shared": "npm i ../shared --no-save",
 		"unlink:shared": "npm i",
 		"check": "svelte-check --tsconfig ./tsconfig.json"
