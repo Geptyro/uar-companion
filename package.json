@@ -31,7 +31,7 @@
 	"devDependencies": {
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
 		"@types/node": "^24.0.0",
-		"electron": "^38.8.6",
+		"electron": "^43.2.0",
 		"electron-builder": "^26.0.12",
 		"electron-vite": "^4.0.1",
 		"svelte": "^5.0.0",
@@ -39,7 +39,7 @@
 		"typescript": "^5.9.0"
 	},
 	"allowScripts": {
-		"electron@38.8.6": true,
+		"electron@43.2.0": true,
 		"esbuild@0.25.12": true,
 		"esbuild@0.28.1": true,
 		"electron-winstaller@5.4.0": true

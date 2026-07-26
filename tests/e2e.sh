@@ -17,7 +17,9 @@ APPPORT=$((40000 + RANDOM % 10000))
 SUFFIX=$$
 CLEANUP() {
 	docker rm -f "tray-e2e-mongo-$SUFFIX" "tray-e2e-minio-$SUFFIX" >/dev/null 2>&1 || true
-	[ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
+	# SIGKILL, not TERM: adapter-node shuts down gracefully and lingers on
+	# open connections, which leaves an orphan holding the script's stdout
+	[ -n "${SERVER_PID:-}" ] && kill -9 "$SERVER_PID" 2>/dev/null || true
 	rm -rf "$T"
 }
 trap CLEANUP EXIT

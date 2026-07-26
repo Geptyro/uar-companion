@@ -63,11 +63,31 @@ function decrypt(data: Uint8Array, key: number): Uint8Array {
 	return out;
 }
 
-function decompress(data: Uint8Array): Uint8Array {
+/**
+ * Ceiling for one decompressed file. Nothing in a real replay approaches
+ * it; without a cap a corrupt or crafted archive inflates a few hundred
+ * kilobytes into gigabytes and takes the app down with it. Kept identical
+ * to the website's copy — this file is a straight mirror.
+ */
+export const MAX_FILE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * @param expected how many bytes this chunk must produce — the sector size
+ * for multi-sector files, the declared file size for single-unit ones.
+ * Both decoders are bounded by it: zlib refuses to exceed it, and bzip2
+ * writes into a buffer of exactly that size and reports a mismatch.
+ */
+export function decompressChunk(data: Uint8Array, expected: number): Uint8Array {
 	const compressionType = data[0];
 	if (compressionType === 0) return data;
-	if (compressionType === 2) return inflateSync(data.subarray(1));
-	if (compressionType === 16) return Bunzip.decode(Buffer.from(data.subarray(1)));
+	if (!Number.isFinite(expected) || expected <= 0 || expected > MAX_FILE_BYTES) {
+		throw new Error(`refusing to decompress ${expected} bytes from ${data.length}`);
+	}
+	const payload = data.subarray(1);
+	if (compressionType === 2) return inflateSync(payload, { maxOutputLength: expected });
+	// given a size, seek-bzip decodes into a fixed buffer and refuses to grow
+	// it, so an overlong stream throws instead of eating the machine's memory
+	if (compressionType === 16) return Bunzip.decode(Buffer.from(payload), expected);
 	throw new Error(`unsupported MPQ compression type ${compressionType}`);
 }
 
@@ -156,7 +176,14 @@ export class MPQArchive {
 		return out;
 	}
 
-	readFile(filename: string): Uint8Array | null {
+	/**
+	 * @param maxBytes stop after this many decompressed bytes. The bank
+	 * preload we read from replay.game.events sits at the very start of a
+	 * file that can be ten megabytes, and decompressing all of it costs
+	 * over a second — far more than decoding the handful of events we
+	 * actually want. Callers must tolerate a truncated stream.
+	 */
+	readFile(filename: string, maxBytes = Infinity): Uint8Array | null {
 		const hashA = hash(filename, 'HASH_A');
 		const hashB = hash(filename, 'HASH_B');
 		const hashEntry = this.hashTable.find((e) => e.hashA === hashA && e.hashB === hashB);
@@ -172,12 +199,15 @@ export class MPQArchive {
 
 		if (block.flags & MPQ_FILE_SINGLE_UNIT) {
 			if (block.flags & MPQ_FILE_COMPRESS && block.size > block.archivedSize) {
-				return decompress(fileData);
+				return decompressChunk(fileData, block.size);
 			}
 			return fileData;
 		}
 
 		// multi-sector file
+		if (block.size > MAX_FILE_BYTES) {
+			throw new Error(`archive declares a ${block.size} byte file`);
+		}
 		const sectorSize = 512 << this.sectorSizeShift;
 		let sectors = Math.floor(block.size / sectorSize) + 1;
 		const hasCrc = (block.flags & MPQ_FILE_SECTOR_CRC) !== 0;
@@ -188,14 +218,17 @@ export class MPQArchive {
 
 		const parts: Uint8Array[] = [];
 		let bytesLeft = block.size;
+		let produced = 0;
 		const count = positions.length - (hasCrc ? 2 : 1);
 		for (let i = 0; i < count; i++) {
 			let sector = fileData.subarray(positions[i], positions[i + 1]);
 			if (block.flags & MPQ_FILE_COMPRESS && bytesLeft > sector.length) {
-				sector = decompress(sector);
+				sector = decompressChunk(sector, Math.min(sectorSize, bytesLeft));
 			}
 			bytesLeft -= sector.length;
 			parts.push(sector);
+			produced += sector.length;
+			if (produced >= maxBytes) break;
 		}
 		const total = parts.reduce((n, p) => n + p.length, 0);
 		const out = new Uint8Array(total);
