@@ -1,5 +1,5 @@
-appId: dev.cedricdessalles.uar-tray
-productName: UAR Tray
+appId: dev.cedricdessalles.uar-companion
+productName: UAR Companion
 directories:
   buildResources: build
   output: dist
@@ -10,7 +10,12 @@ files:
 asarUnpack:
   - resources/**
 npmRebuild: false
-publish: null
+# metadata for electron-updater (latest*.yml); release.yml attaches it to
+# the GitHub release, the app checks it at runtime
+publish:
+  provider: github
+  owner: Geptyro
+  repo: uar-companion
 win:
   target: nsis
   icon: build/icon.ico
@@ -18,14 +23,14 @@ nsis:
   oneClick: true
   runAfterFinish: true
   createDesktopShortcut: true
-  artifactName: UAR-Tray-Setup-${version}.${ext}
+  artifactName: UAR-Companion-Setup-${version}.${ext}
 linux:
   target: AppImage
   icon: build/icon.png
   category: Game
   synopsis: Undead Assault Reborn replay uploader
-  artifactName: UAR-Tray-${version}.${ext}
+  artifactName: UAR-Companion-${version}.${ext}
   syncDesktopName: true
 mac:
   target: zip
-  artifactName: UAR-Tray-${version}-mac.${ext}
+  artifactName: UAR-Companion-${version}-mac.${ext}

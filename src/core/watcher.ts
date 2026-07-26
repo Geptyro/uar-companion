@@ -20,6 +20,9 @@ export interface WatcherConfig {
 	noBackfill?: boolean;
 	once?: boolean;
 	postSpacing?: number;
+	/** test overrides for the retry backoffs */
+	rateLimitBackoff?: number;
+	transientBackoff?: number;
 }
 
 interface ScanInfo {
@@ -223,11 +226,11 @@ export class Watcher extends EventEmitter {
 				this.event(it.path, 'rejected', out.message);
 				break;
 			case 'ratelimited':
-				this.nextPost = Date.now() + RATE_LIMIT_BACKOFF;
+				this.nextPost = Date.now() + (this.cfg.rateLimitBackoff ?? RATE_LIMIT_BACKOFF);
 				this.event(it.path, 'waiting', 'rate limited — retrying in 15 min');
 				break;
 			case 'transient':
-				this.nextPost = Date.now() + TRANSIENT_BACKOFF;
+				this.nextPost = Date.now() + (this.cfg.transientBackoff ?? TRANSIENT_BACKOFF);
 				this.event(it.path, 'error', `${out.message} — retrying in 2 min`);
 				break;
 		}

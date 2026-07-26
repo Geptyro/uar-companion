@@ -8,7 +8,33 @@ export interface Snapshot {
 	dirs: string[];
 	autoDetected: boolean;
 	history: { at: string; file: string; kind: string; detail?: string }[];
-	ready: { count: number; names: string[]; ok: boolean };
+	ready: {
+		count: number;
+		names: string[];
+		players: { battletag: string; avatar: string | null; until: string }[];
+		ok: boolean;
+	};
+	me: { battletag: string; avatar: string | null; toon: string | null } | null;
+	meReady: boolean;
+	meUntil: string | null;
+	updateVersion: string | null;
+	sc2: {
+		status: 'menus' | 'lobby' | 'ingame';
+		uar: boolean;
+		players?: number;
+		displayTime?: number;
+	} | null;
+	presenceList:
+		| {
+				battletag: string;
+				avatar: string | null;
+				toon: string | null;
+				status: 'lobby' | 'ingame';
+				uar: boolean;
+				players?: number;
+				displayTime?: number;
+		  }[]
+		| null;
 	config: {
 		noBackfill: boolean;
 		notifyUploads: boolean;
@@ -19,7 +45,7 @@ export interface Snapshot {
 
 declare global {
 	interface Window {
-		uarTray: {
+		uarCompanion: {
 			snapshot: () => Promise<Snapshot>;
 			setConfig: (patch: Record<string, unknown>) => Promise<Snapshot>;
 			addFolder: () => Promise<Snapshot>;
@@ -27,7 +53,11 @@ declare global {
 			redetect: () => Promise<Snapshot>;
 			pause: (paused: boolean) => Promise<Snapshot>;
 			openWebsite: () => Promise<void>;
+			openGithub: () => Promise<void>;
 			openLog: () => Promise<void>;
+			login: () => Promise<Snapshot>;
+			logout: () => Promise<Snapshot>;
+			setReady: (on: boolean) => Promise<Snapshot>;
 			onUpdate: (cb: (snapshot: Snapshot) => void) => () => void;
 		};
 	}

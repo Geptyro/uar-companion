@@ -8,16 +8,39 @@ import {
 	dialog,
 	screen,
 	Notification,
-	nativeImage
+	nativeImage,
+	nativeTheme
 } from 'electron';
-import { appendFileSync, mkdirSync, rmSync, statSync, renameSync, writeFileSync } from 'node:fs';
+import {
+	appendFileSync,
+	copyFileSync,
+	mkdirSync,
+	rmSync,
+	statSync,
+	renameSync,
+	writeFileSync
+} from 'node:fs';
 import { join } from 'node:path';
-import { Client, type ReadyPlayerInfo } from '../core/upload.ts';
+import electronUpdater from 'electron-updater';
+import { Client } from '../core/upload.ts';
 import { Store } from '../core/state.ts';
 import { Watcher } from '../core/watcher.ts';
-import { discoverReplayDirs } from '../core/paths.ts';
+import { discoverReplayDirs, findBattleLobby } from '../core/paths.ts';
 import { consumeSSE } from '../core/sse.ts';
 import { loadConfig, saveConfig, DEFAULT_SERVER, type AppConfig } from './config.ts';
+import {
+	fetchMe,
+	fetchReadyRoster,
+	fetchPresenceList,
+	setReadyFlag,
+	sendPresence,
+	openLogin,
+	logout,
+	type Me,
+	type PresenceEntry
+} from './auth.ts';
+import { watchSC2, type SC2Presence } from '../core/sc2.ts';
+import { readFileSync } from 'node:fs';
 import iconPng from '../../resources/icon.png?asset';
 import iconIco from '../../resources/icon.ico?asset';
 
@@ -31,17 +54,37 @@ const isWayland =
 	process.platform === 'linux' &&
 	(process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
 
-// test/dev hook: relocate all app data (config, state, log) in one env var
-if (process.env.UAR_TRAY_DATA) {
-	app.setPath('userData', process.env.UAR_TRAY_DATA);
+// dev convenience: load .env from the project root (UAR_COMPANION_SERVER,
+// UAR_COMPANION_DATA, …) — website convention; packaged builds never have one
+if (!app.isPackaged) {
+	try {
+		for (const line of readFileSync('.env', 'utf8').split('\n')) {
+			const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+			if (m && process.env[m[1]] === undefined) {
+				process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1');
+			}
+		}
+	} catch {
+		// no .env — fine
+	}
 }
+
+// test/dev hook: relocate all app data (config, state, log) in one env var
+if (process.env.UAR_COMPANION_DATA) {
+	app.setPath('userData', process.env.UAR_COMPANION_DATA);
+}
+
+// Linux: the window/taskbar icon comes from a desktop entry, not from the
+// BrowserWindow icon — Wayland matches the window's app_id to a .desktop
+// file name, so both must line up (see installDesktopEntry).
+if (process.platform === 'linux') app.setDesktopName('uar-companion.desktop');
 
 if (!app.requestSingleInstanceLock()) {
 	app.quit();
 }
 
 const userData = app.getPath('userData');
-const logPath = join(userData, 'uar-tray.log');
+const logPath = join(userData, 'uar-companion.log');
 const config: AppConfig = loadConfig(userData);
 
 let win: BrowserWindow | null = null;
@@ -51,7 +94,21 @@ let abort: AbortController | null = null;
 let sseAbort: AbortController | null = null;
 let store: Store;
 let quitting = false;
-let readyState = { count: 0, names: [] as string[], ok: false };
+let readyState = {
+	count: 0,
+	names: [] as string[],
+	players: [] as { battletag: string; avatar: string | null; until: string }[],
+	ok: false
+};
+let me: Me | null = null;
+let meReady = false;
+let meUntil: string | null = null;
+let updateVersion: string | null = null;
+let sc2: SC2Presence | null = null;
+let stopSC2: (() => void) | null = null;
+let presenceMuteUntil = 0;
+/** who is in a lobby/game right now; null until the server endpoint ships */
+let presenceList: PresenceEntry[] | null = null;
 /** null until the first successful fetch — no toasts for the initial roster */
 let knownReady: Map<string, string> | null = null;
 let lastMenuKey = '';
@@ -72,7 +129,7 @@ function log(line: string): void {
 }
 
 function server(): string {
-	return config.server || DEFAULT_SERVER;
+	return process.env.UAR_COMPANION_SERVER || config.server || DEFAULT_SERVER;
 }
 
 function makeClient(): Client {
@@ -91,6 +148,12 @@ function snapshot() {
 		autoDetected: config.dirs.length === 0,
 		history: store.history.slice(0, 50),
 		ready: readyState,
+		me,
+		meReady,
+		meUntil,
+		updateVersion,
+		sc2,
+		presenceList,
 		config: {
 			noBackfill: config.noBackfill,
 			notifyUploads: config.notifyUploads,
@@ -133,10 +196,33 @@ function startWatcher(): void {
 }
 
 async function pollReady(): Promise<void> {
+	void fetchPresenceList(server()).then((list) => {
+		if (JSON.stringify(list) !== JSON.stringify(presenceList)) {
+			presenceList = list;
+			pushUpdate();
+		}
+	});
 	try {
-		const r = await makeClient().ready();
-		announceReadyChanges(r.players, r.count);
-		readyState = { count: r.count, names: r.names, ok: true };
+		const r = await fetchReadyRoster(server());
+		announceReadyChanges(r.players, r.players.length);
+		readyState = {
+			count: r.players.length,
+			names: r.players.map((p) => p.battletag),
+			players: r.players,
+			ok: true
+		};
+		meReady = r.meReady;
+		meUntil = r.meUntil;
+		// covers the app starting while already in a lobby/game: by the time
+		// sign-in state is known, no presence *change* will retrigger this
+		if (meReady && me && sc2 && sc2.status !== 'menus') {
+			if (await setReadyFlag(server(), false)) {
+				log(`ready flag withdrawn — already in a ${sc2.status === 'ingame' ? 'game' : 'lobby'}`);
+				const again = await fetchReadyRoster(server());
+				meReady = again.meReady;
+				meUntil = again.meUntil;
+			}
+		}
 	} catch {
 		// endpoint unreachable (offline, or feature not deployed yet)
 		readyState = { ...readyState, ok: false };
@@ -145,16 +231,20 @@ async function pollReady(): Promise<void> {
 }
 
 /** Toasts set/unset diffs against the last seen roster (never the first one). */
-function announceReadyChanges(players: ReadyPlayerInfo[], count: number): void {
+function announceReadyChanges(players: { battletag: string; until: string }[], count: number): void {
 	const next = new Map(players.map((p) => [p.battletag, p.until]));
 	const prev = knownReady;
 	knownReady = next;
 	if (prev === null || !config.notifyReady) return;
-	const added = [...next.keys()].filter((n) => !prev.has(n));
+	// own toggles come from our own click — no need to announce them
+	const added = [...next.keys()].filter((n) => !prev.has(n) && n !== me?.battletag);
 	// a flag that vanished while its `until` was still comfortably in the
 	// future was unset by the player; anything else just expired — stay quiet
 	const removed = [...prev.entries()]
-		.filter(([n, until]) => !next.has(n) && Date.parse(until) > Date.now() + 60_000)
+		.filter(
+			([n, until]) =>
+				!next.has(n) && n !== me?.battletag && Date.parse(until) > Date.now() + 60_000
+		)
 		.map(([n]) => n);
 	if (added.length === 0 && removed.length === 0) return;
 	const list = (names: string[]) =>
@@ -301,15 +391,34 @@ function refreshTray(): void {
 	const status = watcher?.statusLine ?? 'Starting…';
 	const ready = readyState.ok ? String(readyState.count) : '–';
 	const paused = watcher?.paused ?? false;
-	const key = `${status}|${ready}|${paused}`;
+	const key = `${status}|${ready}|${paused}|${me?.battletag ?? ''}|${meReady}|${updateVersion ?? ''}`;
 	if (key === lastMenuKey) return;
 	lastMenuKey = key;
 	tray.setContextMenu(
 		Menu.buildFromTemplate([
 			{ label: status, enabled: false },
 			{ label: `Ready to play: ${ready}`, enabled: false },
+			...(me
+				? [
+						{
+							label: meReady ? "I'm no longer ready" : 'Flag me ready to play',
+							click: () => void toggleMyReady()
+						}
+					]
+				: []),
+			...(updateVersion
+				? [
+						{
+							label: `Restart to update to v${updateVersion}`,
+							click: () => {
+								quitting = true;
+								electronUpdater.autoUpdater.quitAndInstall();
+							}
+						}
+					]
+				: []),
 			{ type: 'separator' },
-			{ label: 'Open UAR Tray', click: showWindow },
+			{ label: 'Open UAR Companion', click: showWindow },
 			{ label: 'Open website', click: () => void shell.openExternal(server()) },
 			{
 				label: paused ? 'Resume uploads' : 'Pause uploads',
@@ -333,19 +442,22 @@ function refreshTray(): void {
 	);
 	tray.setToolTip(
 		readyState.ok && readyState.count > 0
-			? `UAR Tray — ready to play: ${readyState.names.join(', ')}`
-			: 'UAR Tray — replay uploader'
+			? `UAR Companion — ready to play: ${readyState.names.join(', ')}`
+			: 'UAR Companion — replay uploader'
 	);
 }
 
 function showWindow(): void {
 	if (!win) {
 		win = new BrowserWindow({
-			width: 940,
-			height: 700,
+			width: 900,
+			height: 660,
+			resizable: false,
+			maximizable: false,
+			fullscreenable: false,
 			icon: nativeImage.createFromPath(iconPng),
 			autoHideMenuBar: true,
-			backgroundColor: '#14171c',
+			backgroundColor: nativeTheme.shouldUseDarkColors ? '#14170f' : '#f1efe8',
 			webPreferences: {
 				preload: join(import.meta.dirname, '../preload/index.mjs'),
 				sandbox: false
@@ -370,10 +482,43 @@ function showWindow(): void {
 	}
 }
 
+/**
+ * Linux: install the desktop entry + themed icon that the compositor looks
+ * up for the window icon (and that puts the app in the launcher menu).
+ * Idempotent and best-effort — AppImages are not installed by default, so
+ * the app does it itself on every start.
+ */
+function installDesktopEntry(): void {
+	if (process.platform !== 'linux') return;
+	try {
+		const home = app.getPath('home');
+		const appsDir = join(home, '.local/share/applications');
+		const iconDir = join(home, '.local/share/icons/hicolor/512x512/apps');
+		mkdirSync(appsDir, { recursive: true });
+		mkdirSync(iconDir, { recursive: true });
+		copyFileSync(iconPng, join(iconDir, 'uar-companion.png'));
+		writeFileSync(
+			join(appsDir, 'uar-companion.desktop'),
+			`[Desktop Entry]
+Type=Application
+Name=UAR Companion
+Comment=Undead Assault Reborn companion — replay uploads and live lobby status
+Exec="${process.env.APPIMAGE ?? process.execPath}"
+Icon=uar-companion
+Terminal=false
+Categories=Game;
+StartupWMClass=uar-companion
+`
+		);
+	} catch (e) {
+		log(`desktop entry install skipped: ${e}`);
+	}
+}
+
 function applyAutostart(enabled: boolean): void {
 	if (process.platform === 'linux') {
 		const dir = join(app.getPath('appData'), 'autostart');
-		const desktop = join(dir, 'uar-tray.desktop');
+		const desktop = join(dir, 'uar-companion.desktop');
 		if (!enabled) {
 			rmSync(desktop, { force: true });
 			return;
@@ -382,7 +527,7 @@ function applyAutostart(enabled: boolean): void {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			desktop,
-			`[Desktop Entry]\nType=Application\nName=UAR Tray\nExec="${exec}" --hidden\nX-GNOME-Autostart-enabled=true\n`
+			`[Desktop Entry]\nType=Application\nName=UAR Companion\nIcon=uar-companion\nExec="${exec}" --hidden\nX-GNOME-Autostart-enabled=true\n`
 		);
 	} else {
 		app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
@@ -407,7 +552,13 @@ function wireIpc(): void {
 		if ('dirs' in patch || 'noBackfill' in patch || 'server' in patch) startWatcher();
 		if ('server' in patch) {
 			knownReady = null;
+			presenceMuteUntil = 0;
 			void sseLoop();
+			void fetchMe(server()).then((m) => {
+				me = m;
+				if (sc2) void heartbeat();
+				pushUpdate();
+			});
 			void pollReady();
 		}
 		pushUpdate();
@@ -445,7 +596,85 @@ function wireIpc(): void {
 		return snapshot();
 	});
 	ipcMain.handle('open-website', () => void shell.openExternal(server()));
+	ipcMain.handle('open-github', () =>
+		void shell.openExternal('https://github.com/Geptyro/uar-companion')
+	);
 	ipcMain.handle('open-log', () => void shell.openPath(logPath));
+	ipcMain.handle('login', async () => {
+		await openLogin(server());
+		me = await fetchMe(server());
+		log(me ? `signed in as ${me.battletag}` : 'sign-in window closed without a session');
+		if (me && sc2) void heartbeat();
+		await pollReady();
+		return snapshot();
+	});
+	ipcMain.handle('logout', async () => {
+		await logout(server());
+		me = null;
+		meReady = false;
+		meUntil = null;
+		pushUpdate();
+		return snapshot();
+	});
+	ipcMain.handle('set-ready', async (_e, on: boolean) => {
+		if (me) {
+			if (!(await setReadyFlag(server(), on))) log('setting the ready flag failed');
+			await pollReady();
+		}
+		return snapshot();
+	});
+}
+
+async function toggleMyReady(): Promise<void> {
+	if (!me) return;
+	if (!(await setReadyFlag(server(), !meReady))) log('setting the ready flag failed');
+	await pollReady();
+}
+
+/**
+ * Heartbeats the SC2 presence to the site (contract agreed with the
+ * website session; harmless 404s until POST /api/presence ships there).
+ */
+async function heartbeat(): Promise<void> {
+	if (!me || Date.now() < presenceMuteUntil) return;
+	const status = await sendPresence(server(), sc2);
+	if (status === 404) presenceMuteUntil = Date.now() + 60 * 60_000;
+}
+
+function onSC2Change(presence: SC2Presence | null): void {
+	sc2 = presence;
+	log(
+		`sc2: ${presence ? `${presence.status}${presence.uar ? ' (UAR)' : ''}${presence.players ? `, ${presence.players} players` : ''}${presence.lobbyId ? `, lobby ${presence.lobbyId}` : ''}` : 'not running'}`
+	);
+	void heartbeat();
+	// in a lobby or game = not looking anymore: withdraw the ready flag
+	// (the server enforces the same rule on heartbeats)
+	if (presence && presence.status !== 'menus' && me && meReady) {
+		void (async () => {
+			if (await setReadyFlag(server(), false)) {
+				log(`ready flag withdrawn — ${presence.status === 'ingame' ? 'game started' : 'joined a lobby'}`);
+				await pollReady();
+			}
+		})();
+	}
+	pushUpdate();
+}
+
+function initAutoUpdate(): void {
+	// unsigned macOS builds cannot auto-update (Squirrel.Mac requires signing)
+	if (!app.isPackaged || process.platform === 'darwin') return;
+	const { autoUpdater } = electronUpdater;
+	autoUpdater.autoDownload = true;
+	autoUpdater.autoInstallOnAppQuit = true;
+	autoUpdater.on('update-downloaded', (info) => {
+		updateVersion = info.version;
+		log(`update v${info.version} downloaded — restart to apply`);
+		pushUpdate();
+	});
+	autoUpdater.on('error', (e) => log(`auto-update: ${e.message}`));
+	const check = () => void autoUpdater.checkForUpdates().catch(() => {});
+	check();
+	setInterval(check, 6 * 60 * 60 * 1000);
 }
 
 app.on('second-instance', showWindow);
@@ -456,23 +685,49 @@ app.on('before-quit', () => {
 	quitting = true;
 	abort?.abort();
 	sseAbort?.abort();
+	stopSC2?.();
+	if (me && sc2) void sendPresence(server(), null); // best-effort clear
 	toastWin?.destroy();
 });
 
 void app.whenReady().then(() => {
-	app.setAppUserModelId('dev.cedricdessalles.uar-tray');
+	app.setAppUserModelId('dev.cedricdessalles.uar-companion');
+	// test/dev hook: pin the theme regardless of the OS setting
+	if (process.env.UAR_COMPANION_THEME === 'light' || process.env.UAR_COMPANION_THEME === 'dark') {
+		nativeTheme.themeSource = process.env.UAR_COMPANION_THEME;
+	}
 	store = new Store(userData);
-	log(`uar-tray ${app.getVersion()} starting (server ${server()})`);
+	log(`uar-companion ${app.getVersion()} starting (server ${server()})`);
 
 	tray = new Tray(nativeImage.createFromPath(process.platform === 'win32' ? iconIco : iconPng));
 	tray.on('click', showWindow);
 
+	installDesktopEntry();
 	wireIpc();
 	startWatcher();
+	void fetchMe(server()).then((m) => {
+		me = m;
+		// the SC2 watcher may have beaten sign-in resolution (restart while
+		// already in a lobby/game) — its heartbeat was skipped without `me`
+		if (sc2) void heartbeat();
+		pushUpdate();
+	});
 	void pollReady();
 	void sseLoop();
-	// fallback cadence: catches silent flag expiries and any missed events
-	setInterval(() => void pollReady(), 60_000);
+	initAutoUpdate();
+	// in a lobby /game is empty — the battlelobby temp file identifies UAR,
+	// carries the lobbyId and the member battletags
+	stopSC2 = watchSC2(onSC2Change, undefined, () => {
+		const path = findBattleLobby();
+		return path === null ? null : readFileSync(path);
+	});
+	// fallback cadence: catches silent flag expiries and any missed events;
+	// presence re-heartbeats alongside so the server's ~2 min staleness never
+	// trips while SC2 is up
+	setInterval(() => {
+		void pollReady();
+		if (sc2) void heartbeat();
+	}, 60_000);
 
 	if (!process.argv.includes('--hidden')) showWindow();
 	if (!config.firstRunDone) {
@@ -481,7 +736,7 @@ void app.whenReady().then(() => {
 	}
 
 	// smoke-test hook: render a toast without waiting for a real roster change
-	if (process.env.UAR_TRAY_TEST_TOAST) {
+	if (process.env.UAR_COMPANION_TEST_TOAST) {
 		setTimeout(
 			() => showToast('Znimu#743 is ready to play', '3 players ready on uar.cedricdessalles.dev'),
 			1500

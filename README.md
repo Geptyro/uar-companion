@@ -1,4 +1,4 @@
-# UAR Tray
+# UAR Companion
 
 Companion app for **[Undead Assault Reborn](https://uar.cedricdessalles.dev)**
 (StarCraft II arcade, EU). It sits in your system tray and:
@@ -12,18 +12,18 @@ Companion app for **[Undead Assault Reborn](https://uar.cedricdessalles.dev)**
 ## Install
 
 Grab the latest build from the
-[releases page](https://github.com/Geptyro/uar-tray/releases/latest):
+[releases page](https://github.com/Geptyro/uar-companion/releases/latest):
 
 | OS | File | Notes |
 | --- | --- | --- |
-| Windows | `UAR-Tray-Setup-<version>.exe` | one-click installer; SmartScreen may warn (unsigned) — “More info → Run anyway” |
-| Linux | `UAR-Tray-<version>.AppImage` | make it executable, then run (see below) |
-| macOS | `UAR-Tray-<version>-mac.zip` | unzip, right-click → Open the first time (unsigned) |
+| Windows | `UAR-Companion-Setup-<version>.exe` | one-click installer; SmartScreen may warn (unsigned) — “More info → Run anyway” |
+| Linux | `UAR-Companion-<version>.AppImage` | make it executable, then run (see below) |
+| macOS | `UAR-Companion-<version>-mac.zip` | unzip, right-click → Open the first time (unsigned) |
 
 **Linux notes:** your browser's "Open" button cannot launch the AppImage —
 KDE/GNOME block running executables from that context, and downloads never
 have the executable bit anyway. Save the file, then either
-`chmod +x UAR-Tray-*.AppImage && ./UAR-Tray-*.AppImage` or right-click →
+`chmod +x UAR-Companion-*.AppImage && ./UAR-Companion-*.AppImage` or right-click →
 Properties → Permissions → "Is executable" in your file manager. AppImages
 also need FUSE: on Arch-based distros `sudo pacman -S fuse2` (or run with
 `--appimage-extract-and-run` instead).
@@ -49,6 +49,7 @@ broadcasts in-game; the website uses it for the public player profiles.
 
 ```bash
 npm install
+cp .env.example .env  # dev overrides: local website + separate app data
 npm run dev        # electron-vite dev with hot reload
 npm test           # unit tests (node:test over the core modules)
 npm run e2e        # full-stack test against a local uar-website + docker rig

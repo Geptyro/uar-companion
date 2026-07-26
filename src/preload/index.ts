@@ -8,7 +8,11 @@ const api = {
 	redetect: () => ipcRenderer.invoke('redetect'),
 	pause: (paused: boolean) => ipcRenderer.invoke('pause', paused),
 	openWebsite: () => ipcRenderer.invoke('open-website'),
+	openGithub: () => ipcRenderer.invoke('open-github'),
 	openLog: () => ipcRenderer.invoke('open-log'),
+	login: () => ipcRenderer.invoke('login'),
+	logout: () => ipcRenderer.invoke('logout'),
+	setReady: (on: boolean) => ipcRenderer.invoke('set-ready', on),
 	onUpdate: (cb: (snapshot: unknown) => void) => {
 		const handler = (_e: unknown, s: unknown) => cb(s);
 		ipcRenderer.on('update', handler);
@@ -16,6 +20,6 @@ const api = {
 	}
 };
 
-contextBridge.exposeInMainWorld('uarTray', api);
+contextBridge.exposeInMainWorld('uarCompanion', api);
 
 export type UarTrayApi = typeof api;

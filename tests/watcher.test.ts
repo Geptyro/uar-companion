@@ -13,7 +13,7 @@ import { Watcher } from '../src/core/watcher.ts';
 // pre-check, upload, state record, restart idempotence.
 test('watcher once-mode pipeline', async () => {
 	const fixture = fileURLToPath(new URL('../testdata/20260723-1808.SC2Replay', import.meta.url));
-	const dir = mkdtempSync(join(tmpdir(), 'uar-tray-test-'));
+	const dir = mkdtempSync(join(tmpdir(), 'uar-companion-test-'));
 	const replay = join(dir, 'Undead Assault reborn.SC2Replay');
 	const junk = join(dir, 'Other Map.SC2Replay');
 	copyFileSync(fixture, replay);

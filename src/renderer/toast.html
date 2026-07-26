@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<title>UAR Tray notification</title>
+		<title>UAR Companion notification</title>
 		<style>
 			* {
 				box-sizing: border-box;
@@ -10,20 +10,20 @@
 			body {
 				margin: 0;
 				background: transparent;
-				font: 13px/1.45 system-ui, sans-serif;
+				font: 13px/1.45 var(--sans);
 				-webkit-user-select: none;
 				user-select: none;
 				overflow: hidden;
 			}
 			.toast {
 				margin: 6px;
-				background: #1c2129;
-				border: 1px solid #2a313c;
-				border-left: 3px solid #e8b34b;
-				border-radius: 10px;
+				background: var(--surface);
+				border: 1px solid var(--border);
+				border-left: 3px solid var(--accent);
+				border-radius: var(--r);
 				padding: 12px 14px;
-				color: #e7e4dc;
-				box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+				color: var(--ink);
+				box-shadow: var(--shadow-2);
 				cursor: pointer;
 				animation: slide-in 0.22s ease-out;
 			}
@@ -36,7 +36,7 @@
 			}
 			.sub {
 				margin: 0;
-				color: #9a958a;
+				color: var(--ink-2);
 				font-size: 12px;
 				white-space: nowrap;
 				overflow: hidden;

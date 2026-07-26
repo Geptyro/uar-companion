@@ -27,7 +27,7 @@ export class Client {
 
 	constructor(server: string, version: string) {
 		this.server = server.replace(/\/+$/, '');
-		this.ua = `uar-tray/${version}`;
+		this.ua = `uar-companion/${version}`;
 	}
 
 	get serverUrl(): string {

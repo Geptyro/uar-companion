@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import fg from 'fast-glob';
 
@@ -26,6 +26,7 @@ export function replayDirGlobs(documents?: string): string[] {
 			return [
 				home + '/Games/*/drive_c/users/*/Documents' + tail,
 				home + '/Games/*/drive_c/users/*/My Documents' + tail,
+				home + '/Games/*/pfx/drive_c/users/*/Documents' + tail,
 				home + '/.wine/drive_c/users/*/Documents' + tail,
 				home + '/.wine/drive_c/users/*/My Documents' + tail,
 				home + '/.local/share/Steam/steamapps/compatdata/*/pfx/drive_c/users/*/Documents' + tail,
@@ -36,17 +37,69 @@ export function replayDirGlobs(documents?: string): string[] {
 	}
 }
 
-/** Expands the candidate globs into the folders that actually exist. */
+/**
+ * Candidate globs for SC2's lobby temp file (replay.server.battlelobby) —
+ * written while sitting in a lobby; lists the map's cache hashes.
+ */
+export function battleLobbyGlobs(): string[] {
+	const home = homedir().replaceAll('\\', '/');
+	const tail = '/Temp/StarCraft II/TempWriteReplayP*/replay.server.battlelobby';
+	switch (process.platform) {
+		case 'win32': {
+			const local = (process.env.LOCALAPPDATA ?? home + '/AppData/Local').replaceAll('\\', '/');
+			return [local + tail];
+		}
+		case 'darwin':
+			return [home + '/Library/Caches/Blizzard/StarCraft II' + tail];
+		default:
+			return [
+				home + '/Games/*/drive_c/users/*/AppData/Local' + tail,
+				home + '/Games/*/pfx/drive_c/users/*/AppData/Local' + tail,
+				home + '/.wine/drive_c/users/*/AppData/Local' + tail,
+				home + '/.local/share/Steam/steamapps/compatdata/*/pfx/drive_c/users/*/AppData/Local' + tail
+			];
+	}
+}
+
+/** The newest battlelobby file, or null when none exists. */
+export function findBattleLobby(): string | null {
+	let best: string | null = null;
+	let bestM = 0;
+	for (const pattern of battleLobbyGlobs()) {
+		for (const m of fg.sync(pattern, { absolute: true, suppressErrors: true })) {
+			try {
+				const mt = statSync(m).mtimeMs;
+				if (mt > bestM) {
+					bestM = mt;
+					best = m;
+				}
+			} catch {
+				// vanished
+			}
+		}
+	}
+	return best;
+}
+
+/** Expands the candidate globs into the folders that actually exist —
+ * deduplicated by realpath (Wine's "My Documents" symlinks "Documents", so
+ * two globs can hit the same directory). */
 export function discoverReplayDirs(documents?: string): string[] {
-	const out = new Set<string>();
+	const seen = new Set<string>();
+	const out: string[] = [];
 	for (const pattern of replayDirGlobs(documents)) {
 		for (const m of fg.sync(pattern, { onlyDirectories: true, absolute: true, suppressErrors: true })) {
 			try {
-				if (statSync(m).isDirectory()) out.add(m);
+				if (!statSync(m).isDirectory()) continue;
+				const real = realpathSync(m);
+				if (!seen.has(real)) {
+					seen.add(real);
+					out.push(real);
+				}
 			} catch {
 				// vanished between glob and stat
 			}
 		}
 	}
-	return [...out].sort();
+	return out.sort();
 }

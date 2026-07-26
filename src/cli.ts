@@ -20,7 +20,7 @@ let server = DEFAULT_SERVER;
 let once = false;
 let noBackfill = false;
 let spacing = 0;
-let stateDir = join(homedir(), '.config', 'uar-tray');
+let stateDir = join(homedir(), '.config', 'uar-companion');
 for (let i = 0; i < args.length; i++) {
 	switch (args[i]) {
 		case '--dir':
@@ -49,7 +49,7 @@ for (let i = 0; i < args.length; i++) {
 
 const watchDirs = dirs.length > 0 ? dirs : discoverReplayDirs();
 const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
-log(`uar-tray cli starting (server ${server})`);
+log(`uar-companion cli starting (server ${server})`);
 for (const d of watchDirs) log(`watching ${d}`);
 
 const watcher = new Watcher(
