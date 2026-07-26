@@ -25,7 +25,7 @@
 		"electron-updater": "^6.8.9",
 		"fast-glob": "^3.3.3",
 		"seek-bzip": "^2.0.0",
-		"uar-shared": "git+https://github.com/Geptyro/uar-shared.git#semver:^0.2.0"
+		"uar-shared": "git+https://github.com/Geptyro/uar-shared.git#semver:^0.2.1"
 	},
 	"devDependencies": {
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
