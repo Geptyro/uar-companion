@@ -40,10 +40,21 @@ a 12-human public game and a 1-human solo game. Replays are excluded via
 
 ### 2. Lobby temp file — `replay.server.battlelobby`
 
-Written the moment a lobby forms; persists through the running game, then
-**deleted when the game ends** (the temp dir is where the replay is
-finalized). Only trustworthy while `/ui` shows a lobby screen — that is
-the only moment the app reads it.
+**Not present while a lobby is open.** Verified 2026-07-26, sitting in a
+joined UAR lobby (`ScreenBattleLobby` active): no `battlelobby` file
+anywhere on disk, no `StarCraft II/TempWriteReplayP*` directory in the
+live Proton prefix, and no temp/replay descriptor among SC2's 618 open
+files. An earlier version of this doc claimed it was written when the
+lobby forms; that was wrong.
+
+It is believed to appear at game start — the directory is where the
+replay is written, and our captures came from somewhere — then
+**deleted when the game ends**. Not yet observed directly; the session
+that verified the lobby case ended before a game started.
+
+Consequence: `lobbyId` is unavailable for lobbies. The app reads the file
+whenever status is not `menus` (lobby and in-game) and keeps the last
+parse sticky, so an id can only ever arrive from game start onward.
 
 Locations (newest wins; Wine user dirs may be symlinked duplicates):
 
@@ -117,9 +128,16 @@ Poll cadence: 4 s while SC2 answers, 30 s backoff while it doesn't.
 ### Grouping heartbeats into games and lobbies
 
 - **Primary key: `lobbyId`** (from the battlelobby file, kept sticky
-  through the game since SC2 deletes the file at game end). Groups lobby
-  members AND game members exactly, and hard-links a live game to the
-  replay uploaded afterwards (same `m_randomValue`).
+  through the game since SC2 deletes the file at game end). Groups game
+  members exactly and hard-links a live game to the replay uploaded
+  afterwards (same `m_randomValue`). It does **not** group lobbies: the
+  file does not exist yet while a lobby is open (see above).
+- **Lobbies: one at a time.** With no id to key on, lobby reporters would
+  fall back to matching their exact roster set — but rosters differ by a
+  few seconds of joins and leaves, so one lobby appeared as several. An
+  id-less lobby reporter now joins the single visible lobby, or they form
+  one group together; only when several identified lobbies are live does
+  each stand alone (uar-shared `groupPresence`).
 - **Fallback: the roster name-set.** Every member of the same game
   reports the identical sorted `/game` roster, so in-game entries with a
   null lobbyId group by `(uar, hash(roster))`; `displayTime` similarity
