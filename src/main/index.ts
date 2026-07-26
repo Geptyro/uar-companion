@@ -21,12 +21,15 @@ import { loadConfig, saveConfig, DEFAULT_SERVER, type AppConfig } from './config
 import iconPng from '../../resources/icon.png?asset';
 import iconIco from '../../resources/icon.ico?asset';
 
-// Wayland compositors place windows themselves (KWin centers them) and
-// ignore requested coordinates, which breaks tray-anchored toasts — run on
-// XWayland where positioning works. UAR_TRAY_WAYLAND=1 opts back out.
-if (process.platform === 'linux' && !process.env.UAR_TRAY_WAYLAND) {
-	app.commandLine.appendSwitch('ozone-platform', 'x11');
-}
+// On Wayland, apps cannot position their own windows (the compositor
+// places them — KWin centers), so the tray-anchored custom toast is only
+// used on Windows/X11; Wayland sessions get an OS notification instead,
+// which KDE/GNOME anchor near the tray themselves. Forcing XWayland is NOT
+// an option: GPU acceleration segfaults there on some drivers and the
+// software presenter fails to map windows at all.
+const isWayland =
+	process.platform === 'linux' &&
+	(process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
 
 // test/dev hook: relocate all app data (config, state, log) in one env var
 if (process.env.UAR_TRAY_DATA) {
@@ -200,6 +203,13 @@ let toastWin: BrowserWindow | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 function showToast(title: string, sub: string): void {
+	if (isWayland) {
+		// the compositor's notification system is the only thing allowed to
+		// anchor near the tray on Wayland
+		log(`ready notification (wayland): ${title}`);
+		notify(title, sub);
+		return;
+	}
 	const W = 340;
 	const H = 92;
 	toastWin?.destroy();
