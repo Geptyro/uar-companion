@@ -1,6 +1,7 @@
 export interface Snapshot {
 	version: string;
 	server: string;
+	dev: boolean;
 	status: string;
 	paused: boolean;
 	queued: number;

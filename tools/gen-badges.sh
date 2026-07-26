@@ -33,3 +33,11 @@ magick "resources/badges/badge-lobby.png" -define icon:auto-resize=48,32,24,16 \
 	"resources/badges/badge-lobby.ico"
 
 echo "badges written to resources/badges/"
+
+# dev build marker: a grey icon, so a dev instance is unmistakable next to
+# the real one in the tray, the panel and the alt-tab list
+magick build/icon.png -resize 512x512 -colorspace Gray -colorspace sRGB \
+	resources/icon-dev.png
+magick resources/icon-dev.png -define icon:auto-resize=256,128,64,48,32,16 \
+	resources/icon-dev.ico
+echo "dev icon written"

@@ -43,8 +43,10 @@ import {
 import { watchSC2, type SC2Presence } from '../core/sc2.ts';
 import { splitPresence } from 'uar-shared/presence';
 import { readFileSync } from 'node:fs';
-import iconPng from '../../resources/icon.png?asset';
-import iconIco from '../../resources/icon.ico?asset';
+import iconPngProd from '../../resources/icon.png?asset';
+import iconIcoProd from '../../resources/icon.ico?asset';
+import iconPngDev from '../../resources/icon-dev.png?asset';
+import iconIcoDev from '../../resources/icon-dev.ico?asset';
 
 // On Wayland, apps cannot position their own windows (the compositor
 // places them — KWin centers), so the tray-anchored custom toast is only
@@ -55,6 +57,17 @@ import iconIco from '../../resources/icon.ico?asset';
 const isWayland =
 	process.platform === 'linux' &&
 	(process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
+
+/**
+ * A dev run is a different app: its own desktop entry, grey icon, window
+ * title and tray tooltip, so it can never be mistaken for — or overwrite
+ * the desktop entry of — the installed one.
+ */
+const isDev = !app.isPackaged;
+const appLabel = isDev ? 'UAR Companion (dev)' : 'UAR Companion';
+const desktopId = isDev ? 'uar-companion-dev' : 'uar-companion';
+const iconPng = isDev ? iconPngDev : iconPngProd;
+const iconIco = isDev ? iconIcoDev : iconIcoProd;
 
 // dev convenience: load .env from the project root (UAR_COMPANION_SERVER,
 // UAR_COMPANION_DATA, …) — website convention; packaged builds never have one
@@ -83,7 +96,7 @@ if (process.env.UAR_COMPANION_DATA) {
 // a future removal cannot crash startup.
 if (process.platform === 'linux') {
 	(app as unknown as { setDesktopName?: (name: string) => void }).setDesktopName?.(
-		'uar-companion.desktop'
+		`${desktopId}.desktop`
 	);
 }
 
@@ -149,6 +162,7 @@ function snapshot() {
 	return {
 		version: app.getVersion(),
 		server: server(),
+		dev: isDev,
 		status: watcher?.statusLine ?? 'Starting…',
 		paused: watcher?.paused ?? false,
 		queued: watcher?.pending.length ?? 0,
@@ -464,8 +478,8 @@ function refreshTray(): void {
 	);
 	tray.setToolTip(
 		readyState.ok && readyState.count > 0
-			? `UAR Companion — ready to play: ${readyState.names.join(', ')}`
-			: 'UAR Companion — replay uploader'
+			? `${appLabel} — ready to play: ${readyState.names.join(', ')}`
+			: `${appLabel} — ${server().replace(/^https?:\/\//, '')}`
 	);
 }
 
@@ -474,6 +488,7 @@ function showWindow(): void {
 		win = new BrowserWindow({
 			width: 900,
 			height: 660,
+			title: appLabel,
 			resizable: false,
 			maximizable: false,
 			fullscreenable: false,
@@ -526,16 +541,16 @@ function installDesktopEntry(): void {
 	try {
 		const home = app.getPath('home');
 		const appsDir = join(home, '.local/share/applications');
-		const desktopFile = join(appsDir, 'uar-companion.desktop');
+		const desktopFile = join(appsDir, `${desktopId}.desktop`);
 		const entry = `[Desktop Entry]
 Type=Application
-Name=UAR Companion
+Name=${appLabel}
 Comment=Undead Assault Reborn companion — replay uploads and live lobby status
 Exec="${process.env.APPIMAGE ?? process.execPath}"${launchFlags()}
-Icon=uar-companion
+Icon=${desktopId}
 Terminal=false
 Categories=Game;
-StartupWMClass=uar-companion
+StartupWMClass=${desktopId}
 `;
 		let changed = false;
 		if (readIfExists(desktopFile) !== entry) {
@@ -549,7 +564,7 @@ StartupWMClass=uar-companion
 		const source = nativeImage.createFromPath(iconPng);
 		for (const size of [16, 24, 32, 48, 64, 128, 256, 512]) {
 			const dir = join(home, `.local/share/icons/hicolor/${size}x${size}/apps`);
-			const file = join(dir, 'uar-companion.png');
+			const file = join(dir, `${desktopId}.png`);
 			if (existsSync(file)) continue;
 			mkdirSync(dir, { recursive: true });
 			writeFileSync(file, source.resize({ width: size, height: size }).toPNG());
@@ -612,7 +627,7 @@ function applyAutostart(enabled: boolean): void {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			desktop,
-			`[Desktop Entry]\nType=Application\nName=UAR Companion\nIcon=uar-companion\nExec="${exec}"${launchFlags()} --hidden\nX-GNOME-Autostart-enabled=true\n`
+			`[Desktop Entry]\nType=Application\nName=${appLabel}\nIcon=${desktopId}\nExec="${exec}"${launchFlags()} --hidden\nX-GNOME-Autostart-enabled=true\n`
 		);
 	} else {
 		app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });

@@ -106,6 +106,11 @@
 			<div class="brand-text">
 				<b>UAR Companion</b>
 				<span class="ver">v{snap.version}</span>
+				{#if snap.dev}
+					<span class="devtag" title="Development build — {snap.server}">
+						DEV · {snap.server.replace(/^https?:\/\//, '')}
+					</span>
+				{/if}
 			</div>
 			<span class="top-status" class:paused={snap.paused}>
 				{snap.status}{sc2Label ? ` · ${sc2Label}` : ''}
@@ -318,6 +323,15 @@
 	}
 	.brand-text b {
 		font-size: 14.5px;
+	}
+	.devtag {
+		font: 600 9.5px/1 var(--mono);
+		letter-spacing: 0.06em;
+		padding: 3px 7px;
+		border-radius: 99px;
+		background: var(--hostile);
+		color: #fff;
+		white-space: nowrap;
 	}
 	.ver {
 		font: 500 10.5px/1 var(--mono);
