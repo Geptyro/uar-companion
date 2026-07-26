@@ -19,6 +19,7 @@ export interface Snapshot {
 	meReady: boolean;
 	meUntil: string | null;
 	updateVersion: string | null;
+	updateDownloading: string | null;
 	sc2: {
 		status: 'menus' | 'lobby' | 'ingame';
 		uar: boolean;
@@ -57,6 +58,7 @@ declare global {
 			openWebsite: () => Promise<void>;
 			openGithub: () => Promise<void>;
 			openLog: () => Promise<void>;
+	installUpdate: () => Promise<void>;
 			login: () => Promise<Snapshot>;
 			logout: () => Promise<Snapshot>;
 			setReady: (on: boolean) => Promise<Snapshot>;

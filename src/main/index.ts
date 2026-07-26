@@ -125,6 +125,7 @@ let me: Me | null = null;
 let meReady = false;
 let meUntil: string | null = null;
 let updateVersion: string | null = null;
+let updateDownloading: string | null = null;
 let sc2: SC2Presence | null = null;
 let stopSC2: (() => void) | null = null;
 let presenceMuteUntil = 0;
@@ -175,6 +176,7 @@ function snapshot() {
 		meReady,
 		meUntil,
 		updateVersion,
+		updateDownloading,
 		sc2,
 		presenceList,
 		presenceKnown,
@@ -701,6 +703,15 @@ function wireIpc(): void {
 		void shell.openExternal('https://github.com/Geptyro/uar-companion')
 	);
 	ipcMain.handle('open-log', () => void shell.openPath(logPath));
+	ipcMain.handle('install-update', () => {
+		if (!updateVersion) return;
+		if (process.env.UAR_COMPANION_TEST_UPDATE) {
+			log(`install-update clicked (test hook, would install v${updateVersion})`);
+			return;
+		}
+		quitting = true;
+		electronUpdater.autoUpdater.quitAndInstall();
+	});
 	ipcMain.handle('login', async () => {
 		await openLogin(server());
 		me = await fetchMe(server());
@@ -784,12 +795,22 @@ function initAutoUpdate(): void {
 	const { autoUpdater } = electronUpdater;
 	autoUpdater.autoDownload = true;
 	autoUpdater.autoInstallOnAppQuit = true;
+	autoUpdater.on('update-available', (info) => {
+		updateDownloading = info.version;
+		log(`update v${info.version} available — downloading`);
+		pushUpdate();
+	});
 	autoUpdater.on('update-downloaded', (info) => {
+		updateDownloading = null;
 		updateVersion = info.version;
 		log(`update v${info.version} downloaded — restart to apply`);
 		pushUpdate();
 	});
-	autoUpdater.on('error', (e) => log(`auto-update: ${e.message}`));
+	autoUpdater.on('error', (e) => {
+		updateDownloading = null;
+		log(`auto-update: ${e.message}`);
+		pushUpdate();
+	});
 	const check = () => void autoUpdater.checkForUpdates().catch(() => {});
 	check();
 	setInterval(check, 6 * 60 * 60 * 1000);
@@ -855,6 +876,13 @@ void app.whenReady().then(() => {
 	if (!config.firstRunDone) {
 		config.firstRunDone = true;
 		saveConfig(userData, config);
+	}
+
+	// smoke-test hook: show the update pill without waiting for a real release
+	// (the indicator is otherwise unverifiable until a newer version exists)
+	if (process.env.UAR_COMPANION_TEST_UPDATE) {
+		updateVersion = process.env.UAR_COMPANION_TEST_UPDATE;
+		pushUpdate();
 	}
 
 	// smoke-test hook: render a toast without waiting for a real roster change

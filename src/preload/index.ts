@@ -10,6 +10,7 @@ const api = {
 	openWebsite: () => ipcRenderer.invoke('open-website'),
 	openGithub: () => ipcRenderer.invoke('open-github'),
 	openLog: () => ipcRenderer.invoke('open-log'),
+	installUpdate: () => ipcRenderer.invoke('install-update'),
 	login: () => ipcRenderer.invoke('login'),
 	logout: () => ipcRenderer.invoke('logout'),
 	setReady: (on: boolean) => ipcRenderer.invoke('set-ready', on),

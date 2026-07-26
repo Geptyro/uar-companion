@@ -111,6 +111,19 @@
 						DEV · {snap.server.replace(/^https?:\/\//, '')}
 					</span>
 				{/if}
+				{#if snap.updateVersion}
+					<button
+						class="updatepill"
+						onclick={() => window.uarCompanion.installUpdate()}
+						title="Restart now and install v{snap.updateVersion}"
+					>
+						Update to v{snap.updateVersion}
+					</button>
+				{:else if snap.updateDownloading}
+					<span class="updatepill downloading" title="Downloading in the background">
+						Downloading v{snap.updateDownloading}…
+					</span>
+				{/if}
 			</div>
 			<span class="top-status" class:paused={snap.paused}>
 				{snap.status}{sc2Label ? ` · ${sc2Label}` : ''}
@@ -266,8 +279,8 @@
 						</p>
 						{#if snap.updateVersion}
 							<p class="note m0 small update">
-								Update v{snap.updateVersion} downloaded — installs on the next restart (or from
-								the tray menu).
+								Update v{snap.updateVersion} is downloaded. Installing restarts the app — it
+								takes a few seconds, and uploads resume on their own.
 							</p>
 						{/if}
 						<div class="card-foot">
@@ -336,6 +349,27 @@
 	.ver {
 		font: 500 10.5px/1 var(--mono);
 		color: var(--sidebar-ink-2);
+	}
+	/* sits where the version does: noticed on sight, never in the way */
+	.updatepill {
+		font: 600 9.5px/1 var(--mono);
+		letter-spacing: 0.06em;
+		padding: 3px 8px;
+		border: 1px solid var(--accent);
+		border-radius: 99px;
+		background: var(--accent);
+		color: var(--on-accent);
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.updatepill:hover {
+		filter: brightness(1.1);
+	}
+	.updatepill.downloading {
+		border-color: var(--sidebar-border, var(--border));
+		background: transparent;
+		color: var(--sidebar-ink-2);
+		cursor: default;
 	}
 	.top-status {
 		flex: 1;
