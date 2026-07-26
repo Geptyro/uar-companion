@@ -531,7 +531,7 @@ function installDesktopEntry(): void {
 Type=Application
 Name=UAR Companion
 Comment=Undead Assault Reborn companion — replay uploads and live lobby status
-Exec="${process.env.APPIMAGE ?? process.execPath}"
+Exec="${process.env.APPIMAGE ?? process.execPath}"${launchFlags()}
 Icon=uar-companion
 Terminal=false
 Categories=Game;
@@ -559,6 +559,18 @@ StartupWMClass=uar-companion
 	} catch (e) {
 		log(`desktop entry install skipped: ${e}`);
 	}
+}
+
+/**
+ * AppImages need FUSE; systems without it can only run them via
+ * --appimage-extract-and-run. When we were started that way (the runtime
+ * unpacks to /tmp/appimage_extracted_* instead of mounting at /tmp/.mount_*),
+ * carry the flag into the entries we write, or launching from the menu or
+ * at login would fail the way a plain double-click does.
+ */
+function launchFlags(): string {
+	const dir = process.env.APPDIR ?? '';
+	return dir.includes('appimage_extracted') ? ' --appimage-extract-and-run' : '';
 }
 
 function readIfExists(path: string): string | null {
@@ -600,7 +612,7 @@ function applyAutostart(enabled: boolean): void {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			desktop,
-			`[Desktop Entry]\nType=Application\nName=UAR Companion\nIcon=uar-companion\nExec="${exec}" --hidden\nX-GNOME-Autostart-enabled=true\n`
+			`[Desktop Entry]\nType=Application\nName=UAR Companion\nIcon=uar-companion\nExec="${exec}"${launchFlags()} --hidden\nX-GNOME-Autostart-enabled=true\n`
 		);
 	} else {
 		app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
