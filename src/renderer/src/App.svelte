@@ -114,6 +114,9 @@
 				<PresenceChips
 					lobbies={split.lobbies}
 					games={split.games}
+					known={snap.presenceKnown ?? {}}
+					toonHref={(toon: string) => `${snap!.server}/players/${toon}`}
+					href={(m: { toon: string | null }) => (m.toon ? `${snap!.server}/players/${m.toon}` : null)}
 					onchipclick={() => window.uarCompanion.openWebsite()}
 				/>
 				{#if snap.ready.ok}

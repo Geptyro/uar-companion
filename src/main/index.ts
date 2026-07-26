@@ -117,6 +117,7 @@ let stopSC2: (() => void) | null = null;
 let presenceMuteUntil = 0;
 /** who is in a lobby/game right now; null until the server endpoint ships */
 let presenceList: PresenceEntry[] | null = null;
+let presenceKnown: Record<string, { toon: string; avatar?: string }> = {};
 /** null until the first successful fetch — no toasts for the initial roster */
 let knownReady: Map<string, string> | null = null;
 let lastMenuKey = '';
@@ -162,6 +163,7 @@ function snapshot() {
 		updateVersion,
 		sc2,
 		presenceList,
+		presenceKnown,
 		config: {
 			noBackfill: config.noBackfill,
 			notifyUploads: config.notifyUploads,
@@ -204,9 +206,11 @@ function startWatcher(): void {
 }
 
 async function pollReady(): Promise<void> {
-	void fetchPresenceList(server()).then((list) => {
+	void fetchPresenceList(server()).then((payload) => {
+		const list = payload?.players ?? null;
 		if (JSON.stringify(list) !== JSON.stringify(presenceList)) {
 			presenceList = list;
+			presenceKnown = payload?.known ?? {};
 			pushUpdate();
 		}
 	});
@@ -479,6 +483,17 @@ function showWindow(): void {
 			webPreferences: {
 				preload: join(import.meta.dirname, '../preload/index.mjs'),
 				sandbox: false
+			}
+		});
+		win.webContents.setWindowOpenHandler(({ url }) => {
+			void shell.openExternal(url);
+			return { action: 'deny' };
+		});
+		win.webContents.on('will-navigate', (e, url) => {
+			// the app is a single page — any link is meant for the browser
+			if (!url.startsWith('file://') && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? '\u0000')) {
+				e.preventDefault();
+				void shell.openExternal(url);
 			}
 		});
 		win.on('close', (e) => {

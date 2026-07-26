@@ -53,7 +53,17 @@ export function parseReadyRoster(body: unknown): ReadyRoster {
 	};
 }
 
-/** GET /api/presence — who is in a lobby/game. */
+export interface PresencePayload {
+	players: PresenceEntry[];
+	/** in-game name → the player the site knows under it */
+	known: Record<string, { toon: string; avatar?: string }>;
+}
+
+/** GET /api/presence — who is in a lobby/game, plus the names the site knows. */
+export function parsePresence(body: unknown): PresencePayload {
+	return { players: parsePresenceList(body), known: (body as { known?: PresencePayload['known'] })?.known ?? {} };
+}
+
 export function parsePresenceList(body: unknown): PresenceEntry[] {
 	const b = body as { players?: PresenceEntry[] };
 	return (b?.players ?? []).map((p) => ({

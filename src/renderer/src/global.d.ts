@@ -35,6 +35,7 @@ export interface Snapshot {
 				displayTime?: number;
 		  }[]
 		| null;
+	presenceKnown?: Record<string, { toon: string; avatar?: string }>;
 	config: {
 		noBackfill: boolean;
 		notifyUploads: boolean;

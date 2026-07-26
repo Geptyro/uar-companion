@@ -10,13 +10,14 @@ import { BrowserWindow, net, session } from 'electron';
 import {
 	parseMe,
 	parseReadyRoster,
-	parsePresenceList,
+	parsePresence,
 	type Me,
 	type ReadyRoster,
 	type PresenceEntry
 } from '../core/api.ts';
 
 export type { Me, ReadyRoster, PresenceEntry };
+export type { PresencePayload } from '../core/api.ts';
 
 function nf(url: string, init?: { method?: string }): Promise<Response> {
 	return net.fetch(url, {
@@ -90,11 +91,11 @@ export function openLogin(server: string): Promise<void> {
  * Who is currently in a lobby or game (GET /api/presence, public). Returns
  * null while the endpoint doesn't exist yet (404) or is unreachable.
  */
-export async function fetchPresenceList(server: string): Promise<PresenceEntry[] | null> {
+export async function fetchPresenceList(server: string): Promise<import('../core/api.ts').PresencePayload | null> {
 	try {
 		const r = await nf(`${server}/api/presence`);
 		if (!r.ok) return null;
-		return parsePresenceList(await r.json());
+		return parsePresence(await r.json());
 	} catch {
 		return null;
 	}
