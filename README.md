@@ -17,8 +17,16 @@ Grab the latest build from the
 | OS | File | Notes |
 | --- | --- | --- |
 | Windows | `UAR-Tray-Setup-<version>.exe` | one-click installer; SmartScreen may warn (unsigned) — “More info → Run anyway” |
-| Linux | `UAR-Tray-<version>.AppImage` | `chmod +x`, then run |
+| Linux | `UAR-Tray-<version>.AppImage` | make it executable, then run (see below) |
 | macOS | `UAR-Tray-<version>-mac.zip` | unzip, right-click → Open the first time (unsigned) |
+
+**Linux notes:** your browser's "Open" button cannot launch the AppImage —
+KDE/GNOME block running executables from that context, and downloads never
+have the executable bit anyway. Save the file, then either
+`chmod +x UAR-Tray-*.AppImage && ./UAR-Tray-*.AppImage` or right-click →
+Properties → Permissions → "Is executable" in your file manager. AppImages
+also need FUSE: on Arch-based distros `sudo pacman -S fuse2` (or run with
+`--appimage-extract-and-run` instead).
 
 On first launch the app finds your `Replays/Multiplayer` folder by itself
 (Windows, macOS, and Lutris / Wine / Steam Proton layouts on Linux). If yours
