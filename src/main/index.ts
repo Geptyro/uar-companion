@@ -223,7 +223,17 @@ function showToast(title: string, sub: string): void {
 	} else {
 		void toast.loadFile(join(import.meta.dirname, '../renderer/toast.html'), { query });
 	}
-	toast.once('ready-to-show', () => toast.showInactive());
+	// transparent windows never fire ready-to-show on some Linux setups
+	// (electron#29717) — reveal on load, with a timer as backstop
+	const reveal = () => {
+		if (!toast.isDestroyed() && !toast.isVisible()) toast.showInactive();
+	};
+	toast.once('ready-to-show', reveal);
+	toast.webContents.once('did-finish-load', () => setTimeout(reveal, 30));
+	setTimeout(reveal, 800);
+	setTimeout(() => {
+		if (!toast.isDestroyed()) log(`toast "${title}" visible: ${toast.isVisible()}`);
+	}, 1500);
 	toast.on('closed', () => {
 		if (toastWin === toast) toastWin = null;
 	});
