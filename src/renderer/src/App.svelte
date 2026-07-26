@@ -119,14 +119,16 @@
 				{#if snap.ready.ok}
 					<HoverPop disabled={readyActive.length === 0} heading={`Ready to play · ${readyActive.length}`}>
 						{#snippet trigger()}
+							<!-- snippets are closures: Svelte's {#if snap} narrowing
+							     doesn't reach inside them, hence the assertions -->
 							<ReadyChip
-								signedIn={snap.me != null}
+								signedIn={snap!.me != null}
 								minutes={myMinutes}
 								level={myMinutes === null ? 'high' : readyLevel(myMinutes)}
 								count={readyActive.length}
 								{busy}
 								locked={inMatch}
-								lockedStatus={snap.sc2?.status === 'ingame' ? 'ingame' : 'lobby'}
+								lockedStatus={snap!.sc2?.status === 'ingame' ? 'ingame' : 'lobby'}
 								ontoggle={(on: boolean) => act(() => window.uarCompanion.setReady(on))}
 								onguest={() => act(window.uarCompanion.login)}
 							/>

@@ -76,8 +76,14 @@ if (process.env.UAR_COMPANION_DATA) {
 
 // Linux: the window/taskbar icon comes from a desktop entry, not from the
 // BrowserWindow icon — Wayland matches the window's app_id to a .desktop
-// file name, so both must line up (see installDesktopEntry).
-if (process.platform === 'linux') app.setDesktopName('uar-companion.desktop');
+// file name, so both must line up (see installDesktopEntry). setDesktopName
+// exists at runtime but is absent from electron.d.ts; call it defensively so
+// a future removal cannot crash startup.
+if (process.platform === 'linux') {
+	(app as unknown as { setDesktopName?: (name: string) => void }).setDesktopName?.(
+		'uar-companion.desktop'
+	);
+}
 
 if (!app.requestSingleInstanceLock()) {
 	app.quit();
