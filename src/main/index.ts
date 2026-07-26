@@ -720,7 +720,11 @@ async function heartbeat(): Promise<void> {
 		// lobby/game and still mark the players it knows. The lobby file
 		// pairs profile names with account battletags — ours is the match.
 		const { members, ...rest } = sc2;
-		const selfName = members?.find((m) => m.battletag === account.battletag)?.profile;
+		// the lobby file carries "Name#123", the in-game roster only "Name" —
+		// send the bare name so it lines up with the roster entries
+		const selfName = members
+			?.find((m) => m.battletag === account.battletag)
+			?.profile.replace(/#\d+$/, '');
 		beat = selfName ? { ...rest, selfName } : rest;
 	}
 	const status = await sendPresence(server(), beat);
