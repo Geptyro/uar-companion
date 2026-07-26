@@ -1,0 +1,39 @@
+{
+	"name": "uar-tray",
+	"productName": "UAR Tray",
+	"version": "0.1.0",
+	"description": "Undead Assault Reborn companion: auto-uploads your SC2 replays to uar.cedricdessalles.dev and shows who is ready to play",
+	"type": "module",
+	"main": "./out/main/index.js",
+	"author": "Cédric Dessalles",
+	"license": "MIT",
+	"scripts": {
+		"dev": "electron-vite dev",
+		"build": "electron-vite build",
+		"start": "electron-vite preview",
+		"test": "node --test \"tests/*.test.ts\"",
+		"e2e": "bash tests/e2e.sh",
+		"dist:linux": "electron-vite build && electron-builder --linux",
+		"dist:win": "electron-vite build && electron-builder --win",
+		"dist:mac": "electron-vite build && electron-builder --mac"
+	},
+	"dependencies": {
+		"fast-glob": "^3.3.3",
+		"seek-bzip": "^2.0.0"
+	},
+	"devDependencies": {
+		"@sveltejs/vite-plugin-svelte": "^6.2.1",
+		"@types/node": "^24.0.0",
+		"electron": "^38.8.6",
+		"electron-builder": "^26.0.12",
+		"electron-vite": "^4.0.1",
+		"svelte": "^5.0.0",
+		"typescript": "^5.9.0"
+	},
+	"allowScripts": {
+		"electron@38.8.6": true,
+		"esbuild@0.25.12": true,
+		"esbuild@0.28.1": true,
+		"electron-winstaller@5.4.0": true
+	}
+}

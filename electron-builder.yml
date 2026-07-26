@@ -1,0 +1,31 @@
+appId: dev.cedricdessalles.uar-tray
+productName: UAR Tray
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - resources/**
+  - package.json
+asarUnpack:
+  - resources/**
+npmRebuild: false
+publish: null
+win:
+  target: nsis
+  icon: build/icon.ico
+nsis:
+  oneClick: true
+  runAfterFinish: true
+  createDesktopShortcut: true
+  artifactName: UAR-Tray-Setup-${version}.${ext}
+linux:
+  target: AppImage
+  icon: build/icon.png
+  category: Game
+  synopsis: Undead Assault Reborn replay uploader
+  artifactName: UAR-Tray-${version}.${ext}
+  syncDesktopName: true
+mac:
+  target: zip
+  artifactName: UAR-Tray-${version}-mac.${ext}
