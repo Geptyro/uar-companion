@@ -21,6 +21,13 @@ import { loadConfig, saveConfig, DEFAULT_SERVER, type AppConfig } from './config
 import iconPng from '../../resources/icon.png?asset';
 import iconIco from '../../resources/icon.ico?asset';
 
+// Wayland compositors place windows themselves (KWin centers them) and
+// ignore requested coordinates, which breaks tray-anchored toasts — run on
+// XWayland where positioning works. UAR_TRAY_WAYLAND=1 opts back out.
+if (process.platform === 'linux' && !process.env.UAR_TRAY_WAYLAND) {
+	app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
+
 // test/dev hook: relocate all app data (config, state, log) in one env var
 if (process.env.UAR_TRAY_DATA) {
 	app.setPath('userData', process.env.UAR_TRAY_DATA);
@@ -232,7 +239,10 @@ function showToast(title: string, sub: string): void {
 	toast.webContents.once('did-finish-load', () => setTimeout(reveal, 30));
 	setTimeout(reveal, 800);
 	setTimeout(() => {
-		if (!toast.isDestroyed()) log(`toast "${title}" visible: ${toast.isVisible()}`);
+		if (!toast.isDestroyed()) {
+			const b = toast.getBounds();
+			log(`toast "${title}" visible: ${toast.isVisible()} at ${b.x},${b.y}`);
+		}
 	}, 1500);
 	toast.on('closed', () => {
 		if (toastWin === toast) toastWin = null;
