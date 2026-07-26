@@ -821,6 +821,10 @@ void app.whenReady().then(() => {
 	tray.on('click', showWindow);
 
 	installDesktopEntry();
+	// the autostart entry stores the path we were launched from, so refresh
+	// it on every start: after a manual upgrade the old path is gone and
+	// login would silently start nothing
+	if (config.autostart) applyAutostart(true);
 	wireIpc();
 	startWatcher();
 	void fetchMe(server()).then((m) => {

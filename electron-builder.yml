@@ -29,7 +29,10 @@ linux:
   icon: build/icon.png
   category: Game
   synopsis: Undead Assault Reborn replay uploader
-  artifactName: UAR-Companion-${version}.${ext}
+  # no version in the name: the desktop and autostart entries store this
+  # path, and a manually downloaded new version must land on the same one
+  # or those entries break (auto-updates replace the file in place anyway)
+  artifactName: UAR-Companion.${ext}
   syncDesktopName: true
 mac:
   target: zip

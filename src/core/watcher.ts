@@ -6,11 +6,17 @@ import { Client } from './upload.ts';
 import { Store } from './state.ts';
 import { MAX_UPLOAD_SIZE, isUARReplay } from './sniff.ts';
 
-// Server-side limits are 20 POST attempts and 5 accepted ingests per hour
-// per IP; the spacing below keeps a big backfill safely under the attempt
-// cap and lets the 429 backoff absorb the accept cap.
+// The server accepts a large backfill on purpose (loose flood guard, and
+// it serialises ingest itself), so the queue drains one replay at a time
+// with only a short gap between uploads.
 export const SCAN_INTERVAL = 30_000;
-export const DEFAULT_POST_SPACING = 3.5 * 60_000;
+/**
+ * Gap between uploads. One replay at a time, the next as soon as the
+ * previous finished — a fresh install with hundreds of past games should
+ * catch up in minutes, not days. The server serialises ingest anyway; this
+ * is just breathing room between requests.
+ */
+export const DEFAULT_POST_SPACING = 1_500;
 const RATE_LIMIT_BACKOFF = 15 * 60_000;
 const TRANSIENT_BACKOFF = 2 * 60_000;
 const SETTLE_AGE = 5_000;
@@ -68,7 +74,7 @@ export class Watcher extends EventEmitter {
 	async run(signal?: AbortSignal): Promise<void> {
 		const interval = this.cfg.once ? 1_000 : SCAN_INTERVAL;
 		while (!signal?.aborted) {
-			await this.tick();
+			await this.tick(signal);
 			// -once: exit as soon as everything present is settled and shipped
 			// (or bail after ~5 min so a dead server can't loop forever)
 			if (
@@ -82,10 +88,24 @@ export class Watcher extends EventEmitter {
 		}
 	}
 
-	async tick(): Promise<void> {
+	async tick(signal?: AbortSignal): Promise<void> {
 		if (!this.paused) {
 			await this.scan();
-			await this.maybeUpload();
+			// drain the queue rather than one per scan: a backfill of a few
+			// hundred replays would otherwise trickle out over hours
+			while (this.pending.length > 0 && !this.paused && !signal?.aborted) {
+				const wait = this.nextPost - Date.now();
+				if (wait > 0) {
+					if (wait > this.spacing) break; // backing off — leave it to a later tick
+					await sleep(wait, signal);
+				}
+				const before = this.pending.length;
+				await this.maybeUpload();
+				this.updateStatus();
+				// no progress (rate limited, or the server is unreachable):
+				// stop draining and let the backoff play out
+				if (this.pending.length === before) break;
+			}
 		}
 		this.updateStatus();
 	}
