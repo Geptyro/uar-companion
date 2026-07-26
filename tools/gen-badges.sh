@@ -8,6 +8,7 @@ mkdir -p resources/badges
 
 FONT="DejaVu-Sans-Bold"
 GOLD="#e8b34b"
+LOBBY="#3fa392"
 INK="#181510"
 
 for n in 1 2 3 4 5 6 7 8 9 9plus; do
@@ -22,4 +23,13 @@ for n in 1 2 3 4 5 6 7 8 9 9plus; do
 	magick "resources/badges/badge-$n.png" -define icon:auto-resize=48,32,24,16 \
 		"resources/badges/badge-$n.ico"
 done
+
+# plain dot in the lobby colour — an open lobby outranks the ready count,
+# since it is something to join right now
+magick build/icon.png -resize 128x128 \
+	-fill "$LOBBY" -stroke '#14171c' -strokewidth 4 -draw 'circle 90,90 90,58' \
+	"resources/badges/badge-lobby.png"
+magick "resources/badges/badge-lobby.png" -define icon:auto-resize=48,32,24,16 \
+	"resources/badges/badge-lobby.ico"
+
 echo "badges written to resources/badges/"

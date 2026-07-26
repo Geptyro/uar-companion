@@ -13,7 +13,7 @@ import {
 } from 'electron';
 import {
 	appendFileSync,
-	copyFileSync,
+	existsSync,
 	mkdirSync,
 	rmSync,
 	statSync,
@@ -21,6 +21,7 @@ import {
 	writeFileSync
 } from 'node:fs';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import electronUpdater from 'electron-updater';
 import { Client } from '../core/upload.ts';
 import { Store } from '../core/state.ts';
@@ -40,6 +41,7 @@ import {
 	type PresenceEntry
 } from './auth.ts';
 import { watchSC2, type SC2Presence } from '../core/sc2.ts';
+import { splitPresence } from 'uar-shared/presence';
 import { readFileSync } from 'node:fs';
 import iconPng from '../../resources/icon.png?asset';
 import iconIco from '../../resources/icon.ico?asset';
@@ -375,24 +377,34 @@ function toastPosition(w: number, h: number): { x: number; y: number } {
 	return { x: area.x + area.width - w - 12, y: area.y + area.height - h - 12 };
 }
 
-/** Tray icon with the ready count badged onto it (1–9, 9+). */
-function trayIconFor(count: number): Electron.NativeImage {
+/**
+ * Tray icon badge, most actionable state first: an open lobby (teal dot —
+ * something to join right now) outranks the ready count (1–9, 9+).
+ */
+function trayIconFor(badge: string | null): Electron.NativeImage {
 	const ext = process.platform === 'win32' ? 'ico' : 'png';
-	if (count <= 0) {
+	if (badge === null) {
 		return nativeImage.createFromPath(process.platform === 'win32' ? iconIco : iconPng);
 	}
-	const badge = count > 9 ? '9plus' : String(count);
 	return nativeImage.createFromPath(
 		join(import.meta.dirname, `../../resources/badges/badge-${badge}.${ext}`)
 	);
 }
 
+function trayBadge(): string | null {
+	const lobbies = splitPresence(presenceList ?? []).lobbies.length;
+	if (lobbies > 0) return 'lobby';
+	const count = readyState.ok ? readyState.count : 0;
+	if (count <= 0) return null;
+	return count > 9 ? '9plus' : String(count);
+}
+
 function refreshTray(): void {
 	if (!tray) return;
-	const badgeCount = readyState.ok ? readyState.count : 0;
-	if (String(badgeCount) !== lastTrayIconKey) {
-		lastTrayIconKey = String(badgeCount);
-		tray.setImage(trayIconFor(badgeCount));
+	const badge = trayBadge();
+	if (String(badge) !== lastTrayIconKey) {
+		lastTrayIconKey = String(badge);
+		tray.setImage(trayIconFor(badge));
 	}
 	const status = watcher?.statusLine ?? 'Starting…';
 	const ready = readyState.ok ? String(readyState.count) : '–';
@@ -499,13 +511,8 @@ function installDesktopEntry(): void {
 	try {
 		const home = app.getPath('home');
 		const appsDir = join(home, '.local/share/applications');
-		const iconDir = join(home, '.local/share/icons/hicolor/512x512/apps');
-		mkdirSync(appsDir, { recursive: true });
-		mkdirSync(iconDir, { recursive: true });
-		copyFileSync(iconPng, join(iconDir, 'uar-companion.png'));
-		writeFileSync(
-			join(appsDir, 'uar-companion.desktop'),
-			`[Desktop Entry]
+		const desktopFile = join(appsDir, 'uar-companion.desktop');
+		const entry = `[Desktop Entry]
 Type=Application
 Name=UAR Companion
 Comment=Undead Assault Reborn companion — replay uploads and live lobby status
@@ -514,10 +521,55 @@ Icon=uar-companion
 Terminal=false
 Categories=Game;
 StartupWMClass=uar-companion
-`
-		);
+`;
+		let changed = false;
+		if (readIfExists(desktopFile) !== entry) {
+			mkdirSync(appsDir, { recursive: true });
+			writeFileSync(desktopFile, entry);
+			changed = true;
+		}
+
+		// panels and menus request specific pixel sizes — a lone 512px file
+		// is not found by most of them, so install the whole ladder
+		const source = nativeImage.createFromPath(iconPng);
+		for (const size of [16, 24, 32, 48, 64, 128, 256, 512]) {
+			const dir = join(home, `.local/share/icons/hicolor/${size}x${size}/apps`);
+			const file = join(dir, 'uar-companion.png');
+			if (existsSync(file)) continue;
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(file, source.resize({ width: size, height: size }).toPNG());
+			changed = true;
+		}
+		if (changed) refreshDesktopCaches(home);
 	} catch (e) {
 		log(`desktop entry install skipped: ${e}`);
+	}
+}
+
+function readIfExists(path: string): string | null {
+	try {
+		return readFileSync(path, 'utf8');
+	} catch {
+		return null;
+	}
+}
+
+/** Icon and menu caches are mmap'd — new files stay invisible until the
+ * desktop environment rebuilds them. Best-effort, never blocking. */
+function refreshDesktopCaches(home: string): void {
+	const cmds: [string, string[]][] = [
+		['update-desktop-database', [join(home, '.local/share/applications')]],
+		['gtk-update-icon-cache', ['-f', '-t', join(home, '.local/share/icons/hicolor')]],
+		['kbuildsycoca6', ['--noincremental']]
+	];
+	for (const [cmd, args] of cmds) {
+		try {
+			spawn(cmd, args, { detached: true, stdio: 'ignore' })
+				.on('error', () => {})
+				.unref();
+		} catch {
+			// tool not installed — the environment picks the change up on its own
+		}
 	}
 }
 
