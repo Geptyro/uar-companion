@@ -137,7 +137,7 @@
 					checked={snap.config.notifyReady}
 					onchange={() => toggle('notifyReady')}
 				/>
-				Notify me when someone flags themselves ready to play
+				Show a popup when a player flags (or unflags) ready to play
 			</label>
 			<label>
 				<input

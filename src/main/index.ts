@@ -6,15 +6,17 @@ import {
 	ipcMain,
 	shell,
 	dialog,
+	screen,
 	Notification,
 	nativeImage
 } from 'electron';
 import { appendFileSync, mkdirSync, rmSync, statSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Client } from '../core/upload.ts';
+import { Client, type ReadyPlayerInfo } from '../core/upload.ts';
 import { Store } from '../core/state.ts';
 import { Watcher } from '../core/watcher.ts';
 import { discoverReplayDirs } from '../core/paths.ts';
+import { consumeSSE } from '../core/sse.ts';
 import { loadConfig, saveConfig, DEFAULT_SERVER, type AppConfig } from './config.ts';
 import iconPng from '../../resources/icon.png?asset';
 import iconIco from '../../resources/icon.ico?asset';
@@ -36,10 +38,14 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let watcher: Watcher | null = null;
 let abort: AbortController | null = null;
+let sseAbort: AbortController | null = null;
 let store: Store;
 let quitting = false;
 let readyState = { count: 0, names: [] as string[], ok: false };
+/** null until the first successful fetch — no toasts for the initial roster */
+let knownReady: Map<string, string> | null = null;
 let lastMenuKey = '';
+let lastTrayIconKey = '';
 
 function log(line: string): void {
 	try {
@@ -119,10 +125,8 @@ function startWatcher(): void {
 async function pollReady(): Promise<void> {
 	try {
 		const r = await makeClient().ready();
-		if (config.notifyReady && readyState.ok && readyState.count === 0 && r.count > 0) {
-			notify('Ready to play', `${r.names.join(', ')} ${r.count === 1 ? 'is' : 'are'} ready for a game`);
-		}
-		readyState = { ...r, ok: true };
+		announceReadyChanges(r.players, r.count);
+		readyState = { count: r.count, names: r.names, ok: true };
 	} catch {
 		// endpoint unreachable (offline, or feature not deployed yet)
 		readyState = { ...readyState, ok: false };
@@ -130,8 +134,140 @@ async function pollReady(): Promise<void> {
 	pushUpdate();
 }
 
+/** Toasts set/unset diffs against the last seen roster (never the first one). */
+function announceReadyChanges(players: ReadyPlayerInfo[], count: number): void {
+	const next = new Map(players.map((p) => [p.battletag, p.until]));
+	const prev = knownReady;
+	knownReady = next;
+	if (prev === null || !config.notifyReady) return;
+	const added = [...next.keys()].filter((n) => !prev.has(n));
+	// a flag that vanished while its `until` was still comfortably in the
+	// future was unset by the player; anything else just expired — stay quiet
+	const removed = [...prev.entries()]
+		.filter(([n, until]) => !next.has(n) && Date.parse(until) > Date.now() + 60_000)
+		.map(([n]) => n);
+	if (added.length === 0 && removed.length === 0) return;
+	const list = (names: string[]) =>
+		names.length <= 2 ? names.join(' and ') : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+	const countLine = `${count} player${count === 1 ? '' : 's'} ready on ${server().replace(/^https?:\/\//, '')}`;
+	if (added.length > 0) {
+		showToast(`${list(added)} ${added.length === 1 ? 'is' : 'are'} ready to play`, countLine);
+	} else {
+		showToast(`${list(removed)} ${removed.length === 1 ? 'is' : 'are'} no longer ready`, countLine);
+	}
+}
+
+/**
+ * Live change feed: the site's /api/ready/events SSE stream announces roster
+ * changes (notification-only — state still comes from /api/ready). The 60s
+ * poll in whenReady stays as fallback and catches silent flag expiries the
+ * stream never announces.
+ */
+async function sseLoop(): Promise<void> {
+	sseAbort?.abort();
+	const ctl = new AbortController();
+	sseAbort = ctl;
+	let backoff = 5_000;
+	while (!ctl.signal.aborted) {
+		const connectedAt = Date.now();
+		try {
+			await consumeSSE(
+				`${server()}/api/ready/events`,
+				(name) => {
+					if (name === 'change') void pollReady();
+				},
+				{ signal: ctl.signal }
+			);
+		} catch {
+			// connection refused / dropped / endpoint missing — fall through
+		}
+		if (ctl.signal.aborted) return;
+		// a connection that held for a while resets the backoff
+		if (Date.now() - connectedAt > 60_000) backoff = 5_000;
+		await new Promise((r) => setTimeout(r, backoff));
+		backoff = Math.min(backoff * 2, 60_000);
+	}
+}
+
+let toastWin: BrowserWindow | null = null;
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showToast(title: string, sub: string): void {
+	const W = 340;
+	const H = 92;
+	toastWin?.destroy();
+	if (toastTimer) clearTimeout(toastTimer);
+	const toast = new BrowserWindow({
+		width: W,
+		height: H,
+		frame: false,
+		transparent: true,
+		resizable: false,
+		movable: false,
+		focusable: false,
+		alwaysOnTop: true,
+		skipTaskbar: true,
+		show: false,
+		webPreferences: {
+			preload: join(import.meta.dirname, '../preload/index.mjs'),
+			sandbox: false
+		}
+	});
+	toast.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+	toast.setBounds({ ...toastPosition(W, H), width: W, height: H });
+	const query = { title, sub };
+	if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
+		void toast.loadURL(
+			`${process.env.ELECTRON_RENDERER_URL}/toast.html?${new URLSearchParams(query)}`
+		);
+	} else {
+		void toast.loadFile(join(import.meta.dirname, '../renderer/toast.html'), { query });
+	}
+	toast.once('ready-to-show', () => toast.showInactive());
+	toast.on('closed', () => {
+		if (toastWin === toast) toastWin = null;
+	});
+	toastWin = toast;
+	toastTimer = setTimeout(() => toast.destroy(), 6_000);
+}
+
+/** Right above the tray icon when the OS tells us where it is, else just
+ * above the bottom-right corner of the work area (where trays live). */
+function toastPosition(w: number, h: number): { x: number; y: number } {
+	try {
+		const b = tray?.getBounds();
+		if (b && b.width > 0) {
+			const area = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea;
+			const x = Math.min(Math.max(b.x + b.width / 2 - w / 2, area.x + 8), area.x + area.width - w - 8);
+			const y = b.y > area.y + area.height / 2 ? b.y - h - 8 : b.y + b.height + 8;
+			return { x: Math.round(x), y: Math.round(y) };
+		}
+	} catch {
+		// tray bounds unavailable (common on Linux SNI)
+	}
+	const area = screen.getPrimaryDisplay().workArea;
+	return { x: area.x + area.width - w - 12, y: area.y + area.height - h - 12 };
+}
+
+/** Tray icon with the ready count badged onto it (1–9, 9+). */
+function trayIconFor(count: number): Electron.NativeImage {
+	const ext = process.platform === 'win32' ? 'ico' : 'png';
+	if (count <= 0) {
+		return nativeImage.createFromPath(process.platform === 'win32' ? iconIco : iconPng);
+	}
+	const badge = count > 9 ? '9plus' : String(count);
+	return nativeImage.createFromPath(
+		join(import.meta.dirname, `../../resources/badges/badge-${badge}.${ext}`)
+	);
+}
+
 function refreshTray(): void {
 	if (!tray) return;
+	const badgeCount = readyState.ok ? readyState.count : 0;
+	if (String(badgeCount) !== lastTrayIconKey) {
+		lastTrayIconKey = String(badgeCount);
+		tray.setImage(trayIconFor(badgeCount));
+	}
 	const status = watcher?.statusLine ?? 'Starting…';
 	const ready = readyState.ok ? String(readyState.count) : '–';
 	const paused = watcher?.paused ?? false;
@@ -239,6 +375,11 @@ function wireIpc(): void {
 			}
 		}
 		if ('dirs' in patch || 'noBackfill' in patch || 'server' in patch) startWatcher();
+		if ('server' in patch) {
+			knownReady = null;
+			void sseLoop();
+			void pollReady();
+		}
 		pushUpdate();
 		return snapshot();
 	});
@@ -284,6 +425,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
 	quitting = true;
 	abort?.abort();
+	sseAbort?.abort();
+	toastWin?.destroy();
 });
 
 void app.whenReady().then(() => {
@@ -297,11 +440,21 @@ void app.whenReady().then(() => {
 	wireIpc();
 	startWatcher();
 	void pollReady();
+	void sseLoop();
+	// fallback cadence: catches silent flag expiries and any missed events
 	setInterval(() => void pollReady(), 60_000);
 
 	if (!process.argv.includes('--hidden')) showWindow();
 	if (!config.firstRunDone) {
 		config.firstRunDone = true;
 		saveConfig(userData, config);
+	}
+
+	// smoke-test hook: render a toast without waiting for a real roster change
+	if (process.env.UAR_TRAY_TEST_TOAST) {
+		setTimeout(
+			() => showToast('Znimu#743 is ready to play', '3 players ready on uar.cedricdessalles.dev'),
+			1500
+		);
 	}
 });

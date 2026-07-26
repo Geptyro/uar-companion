@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>UAR Tray notification</title>
+		<style>
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				background: transparent;
+				font: 13px/1.45 system-ui, sans-serif;
+				-webkit-user-select: none;
+				user-select: none;
+				overflow: hidden;
+			}
+			.toast {
+				margin: 6px;
+				background: #1c2129;
+				border: 1px solid #2a313c;
+				border-left: 3px solid #e8b34b;
+				border-radius: 10px;
+				padding: 12px 14px;
+				color: #e7e4dc;
+				box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+				cursor: pointer;
+				animation: slide-in 0.22s ease-out;
+			}
+			.title {
+				font-weight: 650;
+				margin: 0 0 2px;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.sub {
+				margin: 0;
+				color: #9a958a;
+				font-size: 12px;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			@keyframes slide-in {
+				from {
+					opacity: 0;
+					transform: translateY(10px);
+				}
+				to {
+					opacity: 1;
+					transform: none;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<div class="toast" id="toast">
+			<p class="title" id="title"></p>
+			<p class="sub" id="sub"></p>
+		</div>
+		<script type="module" src="/src/toast.ts"></script>
+	</body>
+</html>

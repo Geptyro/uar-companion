@@ -7,9 +7,16 @@ export interface Outcome {
 	message: string;
 }
 
+export interface ReadyPlayerInfo {
+	battletag: string;
+	/** ISO timestamp when this flag silently expires. */
+	until: string;
+}
+
 export interface ReadyState {
 	count: number;
 	names: string[];
+	players: ReadyPlayerInfo[];
 }
 
 const TIMEOUT_MS = 90_000;
@@ -89,9 +96,9 @@ export class Client {
 			signal: AbortSignal.timeout(TIMEOUT_MS)
 		});
 		if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-		const body = (await resp.json()) as { players?: { battletag: string }[] };
-		const names = (body.players ?? []).map((p) => p.battletag);
-		return { count: names.length, names };
+		const body = (await resp.json()) as { players?: { battletag: string; until: string }[] };
+		const players = (body.players ?? []).map((p) => ({ battletag: p.battletag, until: p.until }));
+		return { count: players.length, names: players.map((p) => p.battletag), players };
 	}
 }
 

@@ -68,14 +68,21 @@ test('upload maps statuses to outcomes', async () => {
 	}
 });
 
-test('ready returns count and battletags', async () => {
+test('ready returns count, battletags and expiries', async () => {
 	const { server, url } = await serve(() => ({
 		status: 200,
-		body: '{"me":false,"until":null,"players":[{"battletag":"Foo#123"},{"battletag":"Bar#456"}]}'
+		body: '{"me":false,"until":null,"players":[{"battletag":"Foo#123","until":"2026-01-01T01:00:00Z"},{"battletag":"Bar#456","until":"2026-01-01T02:00:00Z"}]}'
 	}));
 	try {
 		const r = await new Client(url, 'test').ready();
-		assert.deepEqual(r, { count: 2, names: ['Foo#123', 'Bar#456'] });
+		assert.deepEqual(r, {
+			count: 2,
+			names: ['Foo#123', 'Bar#456'],
+			players: [
+				{ battletag: 'Foo#123', until: '2026-01-01T01:00:00Z' },
+				{ battletag: 'Bar#456', until: '2026-01-01T02:00:00Z' }
+			]
+		});
 	} finally {
 		server.close();
 	}
