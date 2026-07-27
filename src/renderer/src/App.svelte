@@ -20,6 +20,14 @@
 	let snap = $state<Snapshot | null>(null);
 	let busy = $state(false);
 	let now = $state(Date.now());
+	let winWidth = $state(window.innerWidth);
+
+	/**
+	 * Narrow window: the chips drop their wording and keep icon + count, so
+	 * the top bar's cluster still fits on one line. Keep in step with the
+	 * 620px media query below, which sheds the wordmark at the same point.
+	 */
+	const compact = $derived(winWidth <= 620);
 
 	onMount(() => {
 		void window.uarCompanion.snapshot().then((s) => (snap = s));
@@ -44,20 +52,15 @@
 	const inMatch = $derived(snap?.sc2 != null && snap.sc2.status !== 'menus');
 	const split = $derived(splitPresence(snap?.presenceList ?? []));
 
-	const sc2Label = $derived.by(() => {
-		const p = snap?.sc2;
-		if (!p) return null;
-		if (p.status === 'menus') return 'SC2 running — in the menus';
-		const what = p.status === 'lobby' ? 'lobby' : 'game';
-		const uar = p.uar ? 'UAR ' : '';
-		const extra = [
-			p.players !== undefined ? `${p.players} players` : null,
-			p.status === 'ingame' && p.displayTime ? `${Math.floor(p.displayTime / 60)} min` : null
-		]
-			.filter(Boolean)
-			.join(', ');
-		return `In a ${uar}${what}${extra ? ` (${extra})` : ''}`;
-	});
+	/**
+	 * Being in a lobby or a game is already told by the ready chip's locked
+	 * state and the presence chips, so only the one thing they don't cover
+	 * gets said here.
+	 */
+	const sc2Label = $derived(snap?.sc2?.status === 'menus' ? 'SC2 running — in the menus' : null);
+
+	/** either half can be absent — no stray separator when one is */
+	const topStatus = $derived([snap?.status, sc2Label].filter(Boolean).join(' · '));
 
 	async function toggle(key: 'noBackfill' | 'notifyUploads' | 'notifyReady' | 'autostart') {
 		if (!snap) return;
@@ -99,13 +102,17 @@
 	};
 </script>
 
+<svelte:window bind:innerWidth={winWidth} />
+
 {#if snap}
 	<div class="shell">
 		<header class="topbar">
 			<span class="brand-mark">UAR</span>
 			<div class="brand-text">
-				<b>UAR Companion</b>
-				<span class="ver">v{snap.version}</span>
+				<span class="brand-name">
+					<b>UAR Companion</b>
+					<span class="ver">v{snap.version}</span>
+				</span>
 				{#if snap.dev}
 					<span class="devtag" title="Development build — {snap.server}">
 						DEV · {snap.server.replace(/^https?:\/\//, '')}
@@ -126,7 +133,7 @@
 				{/if}
 			</div>
 			<span class="top-status" class:paused={snap.paused}>
-				{snap.status}{sc2Label ? ` · ${sc2Label}` : ''}
+				{topStatus}
 			</span>
 			<div class="top-actions">
 				<PresenceChips
@@ -136,6 +143,7 @@
 					toonHref={(toon: string) => `${snap!.server}/players/${toon}`}
 					href={(m: { toon: string | null }) => (m.toon ? `${snap!.server}/players/${m.toon}` : null)}
 					onchipclick={() => window.uarCompanion.openWebsite()}
+					{compact}
 				/>
 				{#if snap.ready.ok}
 					<HoverPop disabled={readyActive.length === 0} heading={`Ready to play · ${readyActive.length}`}>
@@ -152,6 +160,7 @@
 								lockedStatus={snap!.sc2?.status === 'ingame' ? 'ingame' : 'lobby'}
 								ontoggle={(on: boolean) => act(() => window.uarCompanion.setReady(on))}
 								onguest={() => act(window.uarCompanion.login)}
+								{compact}
 							/>
 						{/snippet}
 						{#if readyActive.length > 0}
@@ -166,6 +175,7 @@
 				{/if}
 				{#if snap.me}
 					<AccountChip
+						{compact}
 						battletag={snap.me.battletag}
 						avatar={snap.me.avatar}
 						title="Open the website"
@@ -253,36 +263,38 @@
 				<section class="block fill">
 					<SectionHeading>Settings</SectionHeading>
 					<Card>
-						<Toggle
-							checked={snap.config.notifyReady}
-							onchange={() => toggle('notifyReady')}
-							label="Notify when a player flags (or unflags) ready"
-						/>
-						<Toggle
-							checked={snap.config.notifyUploads}
-							onchange={() => toggle('notifyUploads')}
-							label="Notify when a replay is uploaded"
-						/>
-						<Toggle
-							checked={snap.config.autostart}
-							onchange={() => toggle('autostart')}
-							label="Start with the computer (in the tray)"
-						/>
-						<Toggle
-							checked={!snap.config.noBackfill}
-							onchange={() => toggle('noBackfill')}
-							label="Also upload replays from before install"
-						/>
-						<p class="note m0 small privacy">
-							Only Undead Assault Reborn replays are ever uploaded — every file is checked on
-							your machine first, and uploads respect the server's limits.
-						</p>
-						{#if snap.updateVersion}
-							<p class="note m0 small update">
-								Update v{snap.updateVersion} is downloaded. Installing restarts the app — it
-								takes a few seconds, and uploads resume on their own.
+						<div class="settings-body">
+							<Toggle
+								checked={snap.config.notifyReady}
+								onchange={() => toggle('notifyReady')}
+								label="Notify when a player flags (or unflags) ready"
+							/>
+							<Toggle
+								checked={snap.config.notifyUploads}
+								onchange={() => toggle('notifyUploads')}
+								label="Notify when a replay is uploaded"
+							/>
+							<Toggle
+								checked={snap.config.autostart}
+								onchange={() => toggle('autostart')}
+								label="Start with the computer (in the tray)"
+							/>
+							<Toggle
+								checked={!snap.config.noBackfill}
+								onchange={() => toggle('noBackfill')}
+								label="Also upload replays from before install"
+							/>
+							<p class="note m0 small privacy">
+								Only Undead Assault Reborn replays are ever uploaded — every file is checked on
+								your machine first, and uploads respect the server's limits.
 							</p>
-						{/if}
+							{#if snap.updateVersion}
+								<p class="note m0 small update">
+									Update v{snap.updateVersion} is downloaded. Installing restarts the app — it
+									takes a few seconds, and uploads resume on their own.
+								</p>
+							{/if}
+						</div>
 						<div class="card-foot">
 							{#if snap.me}
 								<Button variant="ghost" onclick={() => act(window.uarCompanion.logout)}>Sign out</Button>
@@ -330,12 +342,20 @@
 	}
 	.brand-text {
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		gap: 8px;
 		white-space: nowrap;
 	}
+	/* version sits under the name, not beside it: two short lines against the
+	   32px mark instead of one long one */
+	.brand-name {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
 	.brand-text b {
 		font-size: 14.5px;
+		line-height: 1.1;
 	}
 	.devtag {
 		font: 600 9.5px/1 var(--mono);
@@ -442,6 +462,12 @@
 	.privacy {
 		margin-top: 10px;
 	}
+	/* the window can be made short — the controls scroll, the buttons stay put */
+	.settings-body {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+	}
 
 	.m0 {
 		margin: 0;
@@ -464,6 +490,10 @@
 		list-style: none;
 		margin: 0;
 		padding: 0;
+		/* a long folder list must not crowd the settings card out of a short
+		   window — it scrolls instead of pushing */
+		max-height: 132px;
+		overflow-y: auto;
 	}
 	.dirs li {
 		display: flex;
@@ -530,5 +560,69 @@
 	.update {
 		margin-top: 8px;
 		color: var(--accent);
+	}
+
+	/* Shrunk down, the two columns stop being readable long before the window
+	   runs out of room: stack everything and let the page scroll instead.
+	   The wide layout is one chain of flex and grid boxes sized to the
+	   viewport, each with min-height: 0 — leave any of it in place while the
+	   cards stop clipping and the content spills over the next section. So
+	   this drops the whole model and goes back to plain block flow, where a
+	   box is as tall as what's in it and overlap cannot happen. */
+	@media (max-width: 720px) {
+		main.grid {
+			display: block;
+			/* y only: the base rule's overflow-x stays hidden, so nothing is
+			   ever cut off sideways */
+			overflow-y: auto;
+		}
+		.col,
+		.block,
+		.block.fill,
+		.block.fill :global(.card),
+		.feed,
+		.settings-body {
+			display: block;
+			overflow: visible;
+		}
+		.dirs {
+			max-height: none;
+		}
+		/* margin-top: auto has nothing to push against outside a flex column */
+		.block.fill .card-foot {
+			margin-top: 12px;
+		}
+	}
+
+	/* Last thing the top bar can spare before the chips would be clipped: the
+	   wordmark. The 32px mark still says which app this is, and the update
+	   pill — the one thing in there worth acting on — stays. */
+	@media (max-width: 620px) {
+		.brand-text b,
+		.ver,
+		.devtag {
+			display: none;
+		}
+	}
+
+	/* Narrower than the chip cluster itself: the bar stops being one line and
+	   wraps. Nothing is hidden or clipped — it just grows a row when it has
+	   to, and the status drops under the chips rather than squeezing them off
+	   the edge. With nothing to report the status is empty, so that row
+	   collapses and the bar stays a single line. */
+	@media (max-width: 460px) {
+		.topbar {
+			flex: 0 0 auto;
+			flex-wrap: wrap;
+			row-gap: 6px;
+			padding: 7px 12px;
+		}
+		.top-actions {
+			flex-wrap: wrap;
+		}
+		.top-status {
+			order: 9;
+			flex: 0 0 100%;
+		}
 	}
 </style>

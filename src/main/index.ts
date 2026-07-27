@@ -28,7 +28,15 @@ import { Store } from '../core/state.ts';
 import { Watcher } from '../core/watcher.ts';
 import { discoverReplayDirs, findBattleLobby } from '../core/paths.ts';
 import { consumeSSE } from '../core/sse.ts';
-import { loadConfig, saveConfig, DEFAULT_SERVER, type AppConfig } from './config.ts';
+import {
+	loadConfig,
+	saveConfig,
+	windowPlacement,
+	WINDOW,
+	DEFAULT_SERVER,
+	type AppConfig,
+	type WindowBounds
+} from './config.ts';
 import {
 	fetchMe,
 	fetchReadyRoster,
@@ -427,6 +435,7 @@ function refreshTray(): void {
 		tray.setImage(trayIconFor(badge));
 		log(`tray badge: ${badge ?? 'none'}`);
 	}
+	// empty once idle: nothing worth a line of its own
 	const status = watcher?.statusLine ?? 'Starting…';
 	const ready = readyState.ok ? String(readyState.count) : '–';
 	const paused = watcher?.paused ?? false;
@@ -435,7 +444,7 @@ function refreshTray(): void {
 	lastMenuKey = key;
 	tray.setContextMenu(
 		Menu.buildFromTemplate([
-			{ label: status, enabled: false },
+			...(status ? [{ label: status, enabled: false }] : []),
 			{ label: `Ready to play: ${ready}`, enabled: false },
 			...(me
 				? [
@@ -488,12 +497,22 @@ function refreshTray(): void {
 
 function showWindow(): void {
 	if (!win) {
+		const placed = windowPlacement(
+			config.window,
+			screen.getAllDisplays().map((d) => d.workArea)
+		);
 		win = new BrowserWindow({
-			width: 900,
-			height: 660,
+			width: placed.width,
+			height: placed.height,
+			// both or neither: passing one alone would centre on the other axis
+			...(placed.x !== undefined && placed.y !== undefined
+				? { x: placed.x, y: placed.y }
+				: {}),
+			minWidth: WINDOW.minWidth,
+			minHeight: WINDOW.minHeight,
 			title: appLabel,
-			resizable: false,
-			maximizable: false,
+			// a tray utility has no business taking over the screen — and
+			// leaving fullscreen off keeps maximize as the one grow gesture
 			fullscreenable: false,
 			icon: nativeImage.createFromPath(iconPng),
 			autoHideMenuBar: true,
@@ -503,6 +522,12 @@ function showWindow(): void {
 				sandbox: false
 			}
 		});
+		if (placed.maximized) win.maximize();
+		// electron types these per-event, so no loop over the four
+		win.on('resize', rememberBounds);
+		win.on('move', rememberBounds);
+		win.on('maximize', rememberBounds);
+		win.on('unmaximize', rememberBounds);
 		win.webContents.setWindowOpenHandler(({ url }) => {
 			void shell.openExternal(url);
 			return { action: 'deny' };
@@ -515,6 +540,8 @@ function showWindow(): void {
 			}
 		});
 		win.on('close', (e) => {
+			// last chance to persist the size, whether we are hiding or quitting
+			saveBounds();
 			// closing the window leaves the app in the tray; Quit lives there
 			if (!quitting) {
 				e.preventDefault();
@@ -531,6 +558,36 @@ function showWindow(): void {
 		win.show();
 		win.focus();
 	}
+}
+
+let boundsTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** resize and move fire continuously while dragging — write once it settles */
+function rememberBounds(): void {
+	if (boundsTimer) clearTimeout(boundsTimer);
+	boundsTimer = setTimeout(saveBounds, 400);
+}
+
+function saveBounds(): void {
+	if (boundsTimer) {
+		clearTimeout(boundsTimer);
+		boundsTimer = null;
+	}
+	if (!win || win.isDestroyed()) return;
+	// the normal bounds, not the current ones: unmaximizing after a restart
+	// should land the window back where it was before it was maximized
+	const b = win.getNormalBounds();
+	const next: WindowBounds = {
+		width: b.width,
+		height: b.height,
+		// Wayland never lets an app place its own window, so a position saved
+		// there is junk that would only mislead a later X11 session
+		...(isWayland ? {} : { x: b.x, y: b.y }),
+		maximized: win.isMaximized()
+	};
+	if (JSON.stringify(next) === JSON.stringify(config.window)) return;
+	config.window = next;
+	saveConfig(userData, config);
 }
 
 /**

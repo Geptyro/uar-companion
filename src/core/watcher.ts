@@ -256,22 +256,27 @@ export class Watcher extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Only what the user could act on or would want to know: watching folders
+	 * is the whole point of the app running, so saying so says nothing. Idle
+	 * and working normally reads as an empty status.
+	 */
 	private updateStatus(): void {
-		let s: string;
+		const parts: string[] = [];
 		if (this.cfg.dirs.length === 0) {
-			s = 'No replay folder found — add one in the settings';
+			parts.push('No replay folder found — add one in the settings');
 		} else if (this.paused) {
-			s = 'Paused';
-		} else {
-			s = `Watching ${this.cfg.dirs.length} folder${this.cfg.dirs.length > 1 ? 's' : ''}`;
+			parts.push('Paused');
 		}
-		if (this.uploaded > 0) s += ` — ${this.uploaded} uploaded`;
+		if (this.uploaded > 0) parts.push(`${this.uploaded} uploaded`);
 		if (this.pending.length > 0) {
-			s += ` — ${this.pending.length} queued`;
 			const wait = this.nextPost - Date.now();
-			if (wait > 60_000) s += ` (next in ${Math.round(wait / 60_000)}m)`;
+			parts.push(
+				`${this.pending.length} queued` +
+					(wait > 60_000 ? ` (next in ${Math.round(wait / 60_000)}m)` : '')
+			);
 		}
-		this.setStatus(s);
+		this.setStatus(parts.join(' — '));
 	}
 
 	private setStatus(line: string): void {
