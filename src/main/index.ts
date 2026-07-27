@@ -868,9 +868,18 @@ function initAutoUpdate(): void {
 		log(`auto-update: ${e.message}`);
 		pushUpdate();
 	});
-	const check = () => void autoUpdater.checkForUpdates().catch(() => {});
+	const check = () => {
+		// with an update already downloaded there is nothing left to learn
+		// until the restart: checkForUpdates would find the same version
+		// (isUpdateAvailable compares against the running one), take the
+		// cached file, and re-fire update-downloaded on every tick
+		if (updateVersion) return;
+		void autoUpdater.checkForUpdates().catch(() => {});
+	};
 	check();
-	setInterval(check, 6 * 60 * 60 * 1000);
+	// the app normally sits in the tray for days on end, so this interval —
+	// not a relaunch — is what actually gets a release onto a running install
+	setInterval(check, 10 * 60 * 1000);
 }
 
 app.on('second-instance', showWindow);
