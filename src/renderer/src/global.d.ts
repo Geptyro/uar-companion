@@ -2,10 +2,7 @@ export interface Snapshot {
 	version: string;
 	server: string;
 	dev: boolean;
-	status: string;
 	paused: boolean;
-	queued: number;
-	uploaded: number;
 	dirs: string[];
 	autoDetected: boolean;
 	history: { at: string; file: string; kind: string; detail?: string }[];

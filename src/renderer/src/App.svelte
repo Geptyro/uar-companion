@@ -52,16 +52,6 @@
 	const inMatch = $derived(snap?.sc2 != null && snap.sc2.status !== 'menus');
 	const split = $derived(splitPresence(snap?.presenceList ?? []));
 
-	/**
-	 * Being in a lobby or a game is already told by the ready chip's locked
-	 * state and the presence chips, so only the one thing they don't cover
-	 * gets said here.
-	 */
-	const sc2Label = $derived(snap?.sc2?.status === 'menus' ? 'SC2 running — in the menus' : null);
-
-	/** either half can be absent — no stray separator when one is */
-	const topStatus = $derived([snap?.status, sc2Label].filter(Boolean).join(' · '));
-
 	async function toggle(key: 'noBackfill' | 'notifyUploads' | 'notifyReady' | 'autostart') {
 		if (!snap) return;
 		snap = await window.uarCompanion.setConfig({ [key]: !snap.config[key] });
@@ -132,9 +122,6 @@
 					</span>
 				{/if}
 			</div>
-			<span class="top-status" class:paused={snap.paused}>
-				{topStatus}
-			</span>
 			<div class="top-actions">
 				<PresenceChips
 					lobbies={split.lobbies}
@@ -391,22 +378,13 @@
 		color: var(--sidebar-ink-2);
 		cursor: default;
 	}
-	.top-status {
-		flex: 1;
-		font-size: 12px;
-		color: var(--sidebar-ink-2);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.top-status.paused {
-		color: var(--item);
-	}
 	.top-actions {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		flex-shrink: 0;
+		/* the status text used to be the spacer that held the chips right */
+		margin-left: auto;
 	}
 
 	/* fixed-size dashboard: two columns, only the activity list scrolls */
@@ -606,10 +584,8 @@
 	}
 
 	/* Narrower than the chip cluster itself: the bar stops being one line and
-	   wraps. Nothing is hidden or clipped — it just grows a row when it has
-	   to, and the status drops under the chips rather than squeezing them off
-	   the edge. With nothing to report the status is empty, so that row
-	   collapses and the bar stays a single line. */
+	   wraps rather than clip. Nothing is hidden — it just grows a row when it
+	   has to. */
 	@media (max-width: 460px) {
 		.topbar {
 			flex: 0 0 auto;
@@ -619,10 +595,6 @@
 		}
 		.top-actions {
 			flex-wrap: wrap;
-		}
-		.top-status {
-			order: 9;
-			flex: 0 0 100%;
 		}
 	}
 </style>
