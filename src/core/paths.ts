@@ -1,5 +1,5 @@
 import { realpathSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import fg from 'fast-glob';
 
 /**
@@ -43,11 +43,22 @@ export function replayDirGlobs(documents?: string): string[] {
  */
 export function battleLobbyGlobs(): string[] {
 	const home = homedir().replaceAll('\\', '/');
-	const tail = '/Temp/StarCraft II/TempWriteReplayP*/replay.server.battlelobby';
+	const underTemp = '/StarCraft II/TempWriteReplayP*/replay.server.battlelobby';
+	const tail = '/Temp' + underTemp;
 	switch (process.platform) {
 		case 'win32': {
-			const local = (process.env.LOCALAPPDATA ?? home + '/AppData/Local').replaceAll('\\', '/');
-			return [local + tail];
+			// SC2 writes under the user's temp directory, which is usually
+			// %LOCALAPPDATA%\Temp — but TEMP/TMP get redirected (group policy,
+			// a second drive, a RAM disk), and a miss there costs the player
+			// their lobbyId, so try every candidate Windows offers
+			const clean = (p: string) => p.replaceAll('\\', '/').replace(/\/+$/, '');
+			const local = clean(process.env.LOCALAPPDATA ?? home + '/AppData/Local');
+			const temps = [process.env.TEMP, process.env.TMP, tmpdir()]
+				.filter((t): t is string => Boolean(t))
+				.map(clean);
+			// deduped on the finished glob: on a stock install TEMP *is*
+			// %LOCALAPPDATA%\Temp and every candidate lands on one path
+			return [...new Set([local + tail, ...temps.map((t) => t + underTemp)])];
 		}
 		case 'darwin':
 			return [home + '/Library/Caches/Blizzard/StarCraft II' + tail];

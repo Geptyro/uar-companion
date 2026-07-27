@@ -26,7 +26,7 @@ import electronUpdater from 'electron-updater';
 import { Client } from '../core/upload.ts';
 import { Store } from '../core/state.ts';
 import { Watcher } from '../core/watcher.ts';
-import { discoverReplayDirs, findBattleLobby } from '../core/paths.ts';
+import { battleLobbyGlobs, discoverReplayDirs, findBattleLobby } from '../core/paths.ts';
 import { consumeSSE } from '../core/sse.ts';
 import {
 	loadConfig,
@@ -46,9 +46,11 @@ import {
 	openLogin,
 	logout,
 	type Me,
-	type PresenceEntry
+	type PresenceEntry,
+	type PresenceSplit
 } from './auth.ts';
 import { watchSC2, type SC2Presence } from '../core/sc2.ts';
+import { decideLobbyToast, listNames, NO_LOBBY_TOAST, type LobbyToastState } from '../core/lobby.ts';
 import { splitPresence } from 'uar-shared/presence';
 import { readFileSync } from 'node:fs';
 import iconPngProd from '../../resources/icon.png?asset';
@@ -139,9 +141,13 @@ let stopSC2: (() => void) | null = null;
 let presenceMuteUntil = 0;
 /** who is in a lobby/game right now; null until the server endpoint ships */
 let presenceList: PresenceEntry[] | null = null;
+/** the site's own grouping of that list; null when it sent none (old server) */
+let presenceGroups: PresenceSplit | null = null;
 let presenceKnown: Record<string, { toon: string; avatar?: string }> = {};
 /** null until the first successful fetch — no toasts for the initial roster */
 let knownReady: Map<string, string> | null = null;
+/** as above for the lobby: baseline from the first fetch, plus flap state */
+let lobbyToast: LobbyToastState = NO_LOBBY_TOAST;
 let lastMenuKey = '';
 let lastTrayIconKey = '';
 
@@ -184,11 +190,13 @@ function snapshot() {
 		updateDownloading,
 		sc2,
 		presenceList,
+		presenceGroups,
 		presenceKnown,
 		config: {
 			noBackfill: config.noBackfill,
 			notifyUploads: config.notifyUploads,
 			notifyReady: config.notifyReady,
+			notifyLobby: config.notifyLobby,
 			autostart: config.autostart
 		}
 	};
@@ -231,7 +239,10 @@ async function pollReady(): Promise<void> {
 		const list = payload?.players ?? null;
 		if (JSON.stringify(list) !== JSON.stringify(presenceList)) {
 			presenceList = list;
+			// the groups are the server's function of that same list
+			presenceGroups = payload?.groups ?? null;
 			presenceKnown = payload?.known ?? {};
+			announceLobbyChanges(currentSplit().lobbies);
 			pushUpdate();
 		}
 	});
@@ -261,6 +272,43 @@ async function pollReady(): Promise<void> {
 		readyState = { ...readyState, ok: false };
 	}
 	pushUpdate();
+}
+
+/** A lobby that flaps back within this window is the same lobby, not a new one. */
+const LOBBY_TOAST_GAP_MS = 10 * 60_000;
+
+/** The lobby/game split we are showing: the site's, or ours against an old one. */
+function currentSplit(): PresenceSplit {
+	return presenceGroups ?? splitPresence(presenceList ?? []);
+}
+
+/**
+ * Toasts a lobby forming — the point of the app for anyone waiting for a
+ * game to start. The rules live in core/lobby.ts; this is the I/O around
+ * them.
+ *
+ * Caveat worth knowing: while a lobby is open SC2 exposes nothing that
+ * identifies the map (the battlelobby file that would is not written yet —
+ * docs/sc2-detection.md), so this cannot tell a UAR lobby from any other
+ * SC2 lobby a companion user sits in. The wording stays neutral for that
+ * reason, and the toggle exists for anyone who finds it too eager.
+ */
+function announceLobbyChanges(lobbies: PresenceSplit['lobbies']): void {
+	// lobbies all collapse into one group, so this is the whole picture
+	const { toast, state } = decideLobbyToast(lobbyToast, {
+		members: (lobbies[0]?.members ?? []).map((m) => m.battletag),
+		me: me?.battletag ?? null,
+		enabled: config.notifyLobby,
+		now: Date.now(),
+		gapMs: LOBBY_TOAST_GAP_MS
+	});
+	lobbyToast = state;
+	if (toast === null) return;
+	log(`lobby toast: ${toast.join(', ')}`);
+	showToast(
+		`${listNames(toast)} ${toast.length === 1 ? 'is' : 'are'} in a lobby`,
+		`Open ${server().replace(/^https?:\/\//, '')} to see who joins`
+	);
 }
 
 /** Toasts set/unset diffs against the last seen roster (never the first one). */
@@ -417,7 +465,7 @@ function trayIconFor(badge: string | null): Electron.NativeImage {
 }
 
 function trayBadge(): string | null {
-	const lobbies = splitPresence(presenceList ?? []).lobbies.length;
+	const lobbies = currentSplit().lobbies.length;
 	if (lobbies > 0) return 'lobby';
 	const count = readyState.ok ? readyState.count : 0;
 	if (count <= 0) return null;
@@ -709,6 +757,7 @@ function wireIpc(): void {
 		if ('dirs' in patch || 'noBackfill' in patch || 'server' in patch) startWatcher();
 		if ('server' in patch) {
 			knownReady = null;
+			lobbyToast = NO_LOBBY_TOAST;
 			presenceMuteUntil = 0;
 			void sseLoop();
 			void fetchMe(server()).then((m) => {
@@ -824,6 +873,38 @@ async function heartbeat(): Promise<void> {
 	if (status === 404) presenceMuteUntil = Date.now() + 60 * 60_000;
 }
 
+/** What the last probe found, so a 4 s poll only logs when it changes. */
+let lastLobbyProbe = '';
+
+/**
+ * Reads SC2's battlelobby temp file for the watcher, and says in the log
+ * what it found. A missing file is why a player reports no `lobbyId`, which
+ * is what makes the site work harder to tell whose game is whose — and the
+ * paths are guesswork on any OS we have not sat in front of, so the log has
+ * to name the globs it tried. Silent in a lobby: the file genuinely does not
+ * exist yet there (docs/sc2-detection.md), only a game should have one.
+ */
+function readBattleLobby(status: 'lobby' | 'ingame'): Uint8Array | null {
+	const path = findBattleLobby();
+	const probe = `${status}:${path ?? 'none'}`;
+	const changed = probe !== lastLobbyProbe;
+	lastLobbyProbe = probe;
+	if (path === null) {
+		if (changed && status === 'ingame') {
+			log(`battlelobby: not found in a game — tried ${battleLobbyGlobs().join(' | ')}`);
+		}
+		return null;
+	}
+	try {
+		const raw = readFileSync(path);
+		if (changed) log(`battlelobby: ${path} (${raw.length} bytes)`);
+		return raw;
+	} catch (e) {
+		if (changed) log(`battlelobby: ${path} unreadable — ${e instanceof Error ? e.message : e}`);
+		return null;
+	}
+}
+
 function onSC2Change(presence: SC2Presence | null): void {
 	sc2 = presence;
 	log(
@@ -923,10 +1004,7 @@ void app.whenReady().then(() => {
 	initAutoUpdate();
 	// in a lobby /game is empty — the battlelobby temp file identifies UAR,
 	// carries the lobbyId and the member battletags
-	stopSC2 = watchSC2(onSC2Change, undefined, () => {
-		const path = findBattleLobby();
-		return path === null ? null : readFileSync(path);
-	});
+	stopSC2 = watchSC2(onSC2Change, undefined, readBattleLobby);
 	// fallback cadence: catches silent flag expiries and any missed events;
 	// presence re-heartbeats alongside so the server's ~2 min staleness never
 	// trips while SC2 is up

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMe, parseReadyRoster, parsePresenceList } from '../src/core/api.ts';
+import { parseMe, parseReadyRoster, parsePresence, parsePresenceList } from '../src/core/api.ts';
 
 test('parseMe: signed in, signed out, malformed', () => {
 	assert.deepEqual(parseMe({ battletag: 'Foo#1', avatar: 'https://x/y.jpg', toon: '2-S2-1-1' }), {
@@ -47,9 +47,48 @@ test('parsePresenceList: entries with defaults, empty bodies', () => {
 		players: 12,
 		displayTime: 300,
 		roster: undefined,
-		lobbyId: null
+		lobbyId: null,
+		selfName: undefined
 	});
 	assert.equal(list[1].status, 'lobby');
 	assert.deepEqual(parsePresenceList({}), []);
 	assert.deepEqual(parsePresenceList(null), []);
+});
+
+test('parsePresence: takes the server groups, or leaves us to group locally', () => {
+	const body = {
+		players: [
+			{ battletag: 'A#1', status: 'ingame', uar: true, players: 3, lobbyId: 7 },
+			{ battletag: 'B#2', status: 'ingame', uar: true, players: 3 }
+		],
+		known: { A: { toon: 't-a' } },
+		groups: {
+			lobbies: [],
+			games: [
+				{
+					key: 'id:7',
+					status: 'ingame',
+					uar: true,
+					players: 3,
+					displayTime: 300,
+					members: [
+						{ battletag: 'A#1', status: 'ingame', uar: true, lobbyId: 7 },
+						{ battletag: 'B#2', status: 'ingame', uar: true }
+					]
+				}
+			]
+		}
+	};
+	const parsed = parsePresence(body);
+	assert.equal(parsed.groups?.games.length, 1, 'one game, not one per reporter');
+	assert.equal(parsed.groups?.games[0].key, 'id:7');
+	assert.equal(parsed.groups?.games[0].members.length, 2);
+	assert.equal(parsed.groups?.games[0].members[0].avatar, null, 'members get entry defaults');
+	assert.equal(parsed.groups?.lobbies.length, 0);
+	assert.deepEqual(parsed.known, { A: { toon: 't-a' } });
+
+	// a server that predates the field: no groups, group them ourselves
+	assert.equal(parsePresence({ players: body.players }).groups, undefined);
+	assert.equal(parsePresence({ players: [], groups: { games: [] } }).groups, undefined);
+	assert.equal(parsePresence(null).groups, undefined);
 });

@@ -8,6 +8,8 @@ export interface AppConfig {
 	noBackfill: boolean;
 	notifyUploads: boolean;
 	notifyReady: boolean;
+	/** Toast when a lobby forms on the site (see announceLobbyChanges). */
+	notifyLobby: boolean;
 	autostart: boolean;
 	/** Override for development; empty = production site. */
 	server: string;
@@ -32,6 +34,7 @@ const DEFAULTS: AppConfig = {
 	noBackfill: false,
 	notifyUploads: true,
 	notifyReady: true,
+	notifyLobby: true,
 	autostart: false,
 	server: '',
 	firstRunDone: false

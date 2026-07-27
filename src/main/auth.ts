@@ -17,7 +17,7 @@ import {
 } from '../core/api.ts';
 
 export type { Me, ReadyRoster, PresenceEntry };
-export type { PresencePayload } from '../core/api.ts';
+export type { PresencePayload, PresenceSplit } from '../core/api.ts';
 
 function nf(url: string, init?: { method?: string }): Promise<Response> {
 	return net.fetch(url, {

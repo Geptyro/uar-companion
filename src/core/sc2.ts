@@ -193,13 +193,15 @@ export const SC2_POLL_DOWN = 30_000;
  * Polls the client API and reports presence changes; `null` = SC2 not
  * running. `readLobbyFile` (optional) returns the battlelobby temp file's
  * bytes — parsed for UAR identity, lobbyId and roster while in a lobby
- * (where /game is empty), and kept sticky through the game. Stop via the
- * returned function.
+ * (where /game is empty), and kept sticky through the game. It receives the
+ * current status, because a miss means nothing in a lobby (the file does not
+ * exist yet) and means a lost lobbyId in a game. Stop via the returned
+ * function.
  */
 export function watchSC2(
 	onChange: (presence: SC2Presence | null) => void,
 	base = 'http://localhost:6119',
-	readLobbyFile?: () => Uint8Array | null
+	readLobbyFile?: (status: 'lobby' | 'ingame') => Uint8Array | null
 ): () => void {
 	let stopped = false;
 	let last = 'init';
@@ -230,7 +232,7 @@ export function watchSC2(
 		if (readLobbyFile) {
 			let info: BattleLobbyInfo | null = null;
 			try {
-				const raw = readLobbyFile();
+				const raw = readLobbyFile(presence.status);
 				if (raw) info = parseBattleLobby(raw);
 			} catch {
 				// battlelobby unreadable — fall back to whatever we knew

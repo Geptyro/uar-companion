@@ -58,9 +58,28 @@ parse sticky, so an id can only ever arrive from game start onward.
 
 Locations (newest wins; Wine user dirs may be symlinked duplicates):
 
-- Windows: `%LOCALAPPDATA%\Temp\StarCraft II\TempWriteReplayP*\`
+- Windows: `%LOCALAPPDATA%\Temp\StarCraft II\TempWriteReplayP*\`, plus
+  `%TEMP%` and `%TMP%` when they point elsewhere — group policy, a second
+  drive or a RAM disk moves the temp dir off the profile, and only
+  `%LOCALAPPDATA%\Temp` was searched until 2026-07-27 (unverified on real
+  Windows: nobody here runs it — the log line below is how we find out).
 - Wine/Proton: `<prefix>/drive_c/users/*/AppData/Local/Temp/StarCraft II/TempWriteReplayP*/`
 - macOS (unverified): `~/Library/Caches/Blizzard/StarCraft II/Temp…`
+
+**The log says which case you are in** (`<userData>/uar-companion.log`, or
+the app's open-log action), written once per change rather than per 4 s
+poll:
+
+- `battlelobby: <path> (48168 bytes)` — found and read.
+- `battlelobby: not found in a game — tried <glob> | <glob>` — the paths are
+  wrong for that install. Only ever logged in-game; in a lobby the file is
+  legitimately absent, so a miss there is silent.
+- `battlelobby: <path> unreadable — <reason>` — found, but the read failed.
+
+Pair it with the `sc2:` line: `sc2: ingame (UAR), 12 players` **without**
+`, lobby <id>` right after a successful read means the file was there and
+the id could not be extracted from it — a parser problem (SC2 patch moved
+the marker), not a path problem.
 
 Content (~48 KB): the lobby's `initData` sync state in a **variant
 encoding** — bit-packed overall, but everything we need happens to be
@@ -123,9 +142,19 @@ Poll cadence: 4 s while SC2 answers, 30 s backoff while it doesn't.
   app quit.
 - Side effects (server): `lobby`/`ingame` clears the account's ready flag;
   while fresh, `POST /api/ready` → 409.
-- `GET /api/presence` (public): active lobby/game entries for badges.
+- `GET /api/presence` (public): active lobby/game entries for badges, plus
+  `groups: {lobbies, games}` — the site's own grouping of those entries.
 
 ### Grouping heartbeats into games and lobbies
+
+**The server groups.** `GET /api/presence` ships `groups` alongside the flat
+`players` list, and clients render it as-is; grouping locally is only the
+fallback for a server that predates the field. The rule below is a claim
+about what counts as one game, and it changed twice already — owning it
+server-side means a correction reaches every player on deploy instead of
+waiting for companion installs to update (and macOS builds never
+auto-update at all, being unsigned). `uar-shared/groupPresence` is still
+the single implementation; the server is just where it runs.
 
 - **Primary key: `lobbyId`** (from the battlelobby file, kept sticky
   through the game since SC2 deletes the file at game end). Groups game
@@ -142,6 +171,16 @@ Poll cadence: 4 s while SC2 answers, 30 s backoff while it doesn't.
   reports the identical sorted `/game` roster, so in-game entries with a
   null lobbyId group by `(uar, hash(roster))`; `displayTime` similarity
   is a sanity check.
+- **Then merge what is one game anyway.** Not every member of a game
+  reports a `lobbyId` — plenty of installs never find the battlelobby file
+  — and keying the id-havers apart from the id-less showed one running game
+  as two (observed live on 2026-07-27: a 12-player game where one reporter
+  had the id and one did not). A group with no id folds into one that has
+  it when they share a roster name; matching on any shared name, not the
+  whole set, because rosters drift by a leaver or a hiccuped `/game` poll.
+  Two **different** ids never merge, whatever the names say — the residual
+  gap is two concurrent games sharing a display name with neither carrying
+  an id, which under-counts rather than inventing a game.
 - The server should log lobbyId-vs-replay mismatches (both are known
   server-side once the replay uploads) — free telemetry on extractor
   accuracy across SC2 patches.

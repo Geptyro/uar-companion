@@ -7,7 +7,11 @@ Companion app for **[Undead Assault Reborn](https://uar.cedricdessalles.dev)**
   so your profile, XP history and the leaderboards stay up to date — no manual
   uploads after every game;
 - **shows who is "ready to play"** right in the tray, with an optional
-  notification when someone flags themselves on the website.
+  notification when someone flags themselves on the website;
+- **tells you when a lobby forms**, so you can join while it is filling
+  instead of finding out after the game started. Off with one toggle in
+  Settings if you would rather not be interrupted; it stays quiet for
+  lobbies you are already in.
 
 ## Install
 

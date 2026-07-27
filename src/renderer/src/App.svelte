@@ -50,9 +50,12 @@
 	const readyActive = $derived(snap ? activeReady(snap.ready.players, now) : []);
 	/** in a lobby or game: flagging is blocked (and the flag auto-withdraws) */
 	const inMatch = $derived(snap?.sc2 != null && snap.sc2.status !== 'menus');
-	const split = $derived(splitPresence(snap?.presenceList ?? []));
+	// the site groups; only an older server leaves us to do it locally
+	const split = $derived(snap?.presenceGroups ?? splitPresence(snap?.presenceList ?? []));
 
-	async function toggle(key: 'noBackfill' | 'notifyUploads' | 'notifyReady' | 'autostart') {
+	async function toggle(
+		key: 'noBackfill' | 'notifyUploads' | 'notifyReady' | 'notifyLobby' | 'autostart'
+	) {
 		if (!snap) return;
 		snap = await window.uarCompanion.setConfig({ [key]: !snap.config[key] });
 	}
@@ -255,6 +258,11 @@
 								checked={snap.config.notifyReady}
 								onchange={() => toggle('notifyReady')}
 								label="Notify when a player flags (or unflags) ready"
+							/>
+							<Toggle
+								checked={snap.config.notifyLobby}
+								onchange={() => toggle('notifyLobby')}
+								label="Notify when a lobby forms"
 							/>
 							<Toggle
 								checked={snap.config.notifyUploads}
