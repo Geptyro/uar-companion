@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { basename, join } from 'node:path';
 import { Client } from './upload.ts';
 import { Store } from './state.ts';
@@ -145,7 +145,15 @@ export class Watcher extends EventEmitter {
 		const watchers: FSWatcher[] = [];
 		for (const dir of this.cfg.dirs) {
 			try {
-				const w = watch(dir, { persistent: false }, (_event, name) => {
+				// Windows compares the path we hand libuv against the one the OS
+				// reports for each change, and aborts the process when they differ
+				// — a native assert in fs-event.c, not an exception, so nothing
+				// here could catch it. An 8.3 short component (…\RUNNER~1\…, and
+				// anything under a redirected TEMP) is exactly that mismatch, so
+				// resolve to the canonical form before watching. Same directory
+				// either way; only the wake comes from it.
+				const target = realpath(dir);
+				const w = watch(target, { persistent: false }, (_event, name) => {
 					// SC2 writes plenty of other things in there
 					if (name && !String(name).toLowerCase().endsWith('.sc2replay')) return;
 					this.touched();
@@ -404,6 +412,19 @@ export class Watcher extends EventEmitter {
 		if (line === this.statusLine) return;
 		this.statusLine = line;
 		this.emit('status', line);
+	}
+}
+
+/**
+ * The canonical path, which on Windows means the long form. Falls back to what
+ * it was given: a directory that cannot be resolved cannot be watched either,
+ * and watch() reports that in the way the caller already handles.
+ */
+function realpath(dir: string): string {
+	try {
+		return realpathSync.native(dir);
+	} catch {
+		return dir;
 	}
 }
 
