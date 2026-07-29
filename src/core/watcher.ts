@@ -95,7 +95,16 @@ export class Watcher extends EventEmitter {
 		const stopWatching = this.cfg.once ? null : this.watchDirs();
 		try {
 			while (!signal?.aborted) {
-				await this.tick(signal);
+				try {
+					await this.tick(signal);
+				} catch (e) {
+					// One bad tick must not end the loop: this is the app's whole
+					// heartbeat, and it runs for days. Anything unexpected here —
+					// a filesystem that answered strangely, a store write that
+					// lost a race — costs one scan, not every future one.
+					if (this.cfg.once) throw e;
+					console.error('scan failed, continuing:', e);
+				}
 				// -once: exit as soon as everything present is settled and shipped
 				// (or bail after ~5 min so a dead server can't loop forever)
 				if (
@@ -152,7 +161,14 @@ export class Watcher extends EventEmitter {
 			this.watching = false;
 			if (this.debounce) clearTimeout(this.debounce);
 			this.debounce = null;
-			for (const w of watchers) w.close();
+			for (const w of watchers) {
+				try {
+					w.close();
+				} catch {
+					// already gone, or the directory went with it — shutting down
+					// either way, and this runs in a finally
+				}
+			}
 		};
 	}
 

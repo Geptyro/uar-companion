@@ -165,18 +165,40 @@ test('a replay dropped in is picked up from the watch, not the sweep', async () 
 		new Client(url, 'test'),
 		new Store(join(dir, 'state'))
 	);
-	const uploaded = new Promise<void>((resolve) =>
+	// The deadline is not just a nicer failure message: a pending timer is also
+	// the one handle guaranteed to hold the event loop open. fs.watch is
+	// registered non-persistent, and a runner that let the process fall idle
+	// here would exit mid-test and report the whole file as failed with nothing
+	// to say about which test it was.
+	const uploaded = new Promise<void>((resolve, reject) => {
+		const deadline = setTimeout(
+			() => reject(new Error(`no upload within 20s (posts so far: ${posts()})`)),
+			20_000
+		);
 		w.on('event', (e: { kind: string }) => {
-			if (e.kind === 'uploaded') resolve();
-		})
-	);
+			if (e.kind !== 'uploaded') return;
+			clearTimeout(deadline);
+			resolve();
+		});
+	});
 	try {
 		const started = Date.now();
 		const loop = w.run(abort.signal);
+		// never leave it unawaited: a rejection before `await loop` below would
+		// be an unhandled one, which takes the process down with no test result
+		const crashed = loop.then(
+			() => null,
+			(e: Error) => e
+		);
 		// let the first sweep find an empty folder and settle into its long idle
 		await new Promise((r) => setTimeout(r, 100));
 		copyFileSync(FIXTURE, join(dir, 'Undead Assault reborn.SC2Replay'));
-		await uploaded;
+		await Promise.race([
+			uploaded,
+			crashed.then((e) => {
+				if (e) throw e;
+			})
+		]);
 		// the idle it cut short was IDLE_SCAN_INTERVAL — five whole minutes
 		assert.ok(Date.now() - started < 10_000, 'did not wait for a sweep');
 		assert.equal(posts(), 1);

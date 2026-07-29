@@ -79,12 +79,13 @@ git('add', '--', join(dir, 'release.json'));
 for (const file of ['package.json', 'package-lock.json']) {
 	const raw = readFileSync(file, 'utf8');
 	// only the top-level "version", which is the first one in both files
-	const next = raw.replace(/"version": "\d+\.\d+\.\d+"/, `"version": "${bare}"`);
-	if (next === raw) {
+	const field = /"version": "\d+\.\d+\.\d+"/;
+	if (!field.test(raw)) {
 		console.error(`${file}: no version field to bump — aborting before the tag.`);
 		process.exit(1);
 	}
-	writeFileSync(file, next);
+	// unchanged is fine: re-cutting a version whose build failed lands here
+	writeFileSync(file, raw.replace(field, `"version": "${bare}"`));
 }
 
 const subject = headline ? `${version}: ${headline[0].toLowerCase()}${headline.slice(1)}` : version;
