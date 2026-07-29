@@ -18,6 +18,9 @@ export interface Snapshot {
 	me: { battletag: string; avatar: string | null; toon: string | null } | null;
 	meReady: boolean;
 	meUntil: string | null;
+	/** a newer release exists and has not been fetched — the user starts it */
+	updateAvailable: string | null;
+	/** downloaded and staged; only a restart is left */
 	updateVersion: string | null;
 	updateDownloading: string | null;
 	sc2: {
@@ -54,7 +57,8 @@ declare global {
 			openWebsite: () => Promise<void>;
 			openGithub: () => Promise<void>;
 			openLog: () => Promise<void>;
-	installUpdate: () => Promise<void>;
+			downloadUpdate: () => Promise<Snapshot>;
+			installUpdate: () => Promise<void>;
 			login: () => Promise<Snapshot>;
 			logout: () => Promise<Snapshot>;
 			setReady: (on: boolean) => Promise<Snapshot>;

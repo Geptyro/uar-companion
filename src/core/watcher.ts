@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { basename, join } from 'node:path';
 import { Client } from './upload.ts';
 import { Store } from './state.ts';
@@ -10,6 +10,15 @@ import { MAX_UPLOAD_SIZE, isUARReplay } from './sniff.ts';
 // it serialises ingest itself), so the queue drains one replay at a time
 // with only a short gap between uploads.
 export const SCAN_INTERVAL = 30_000;
+/**
+ * Poll cadence once the directories are under an fs.watch: the watch is what
+ * actually notices a replay, so the sweep is only a safety net for the cases
+ * a watch misses (a directory replaced under us, a filesystem that delivers no
+ * events). Sweeping every 30 s forever is not free where it hurts most —
+ * Windows runs each readdir/stat through Defender's filter, and a replay
+ * folder under OneDrive walks the cloud-files driver on top.
+ */
+export const IDLE_SCAN_INTERVAL = 5 * 60_000;
 /**
  * Gap between uploads. One replay at a time, the next as soon as the
  * previous finished — a fresh install with hundreds of past games should
@@ -29,6 +38,8 @@ export interface WatcherConfig {
 	/** test overrides for the retry backoffs */
 	rateLimitBackoff?: number;
 	transientBackoff?: number;
+	/** test override for how long a file must stop changing to count as done */
+	settleAge?: number;
 }
 
 interface ScanInfo {
@@ -62,6 +73,14 @@ export class Watcher extends EventEmitter {
 	private firstRun = true;
 	private scans = 0;
 	private spacing: number;
+	private settle: number;
+	/** every configured directory is under an fs.watch — sweep can go slow */
+	private watching = false;
+	/** cuts the current idle short; set only while the loop is waiting */
+	private wake: (() => void) | null = null;
+	/** a watch fired since the last scan — do not idle it away */
+	private dirty = false;
+	private debounce: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(cfg: WatcherConfig, client: Client, store: Store) {
 		super();
@@ -69,23 +88,109 @@ export class Watcher extends EventEmitter {
 		this.client = client;
 		this.store = store;
 		this.spacing = cfg.postSpacing && cfg.postSpacing > 0 ? cfg.postSpacing : DEFAULT_POST_SPACING;
+		this.settle = cfg.settleAge ?? SETTLE_AGE;
 	}
 
 	async run(signal?: AbortSignal): Promise<void> {
-		const interval = this.cfg.once ? 1_000 : SCAN_INTERVAL;
-		while (!signal?.aborted) {
-			await this.tick(signal);
-			// -once: exit as soon as everything present is settled and shipped
-			// (or bail after ~5 min so a dead server can't loop forever)
-			if (
-				this.cfg.once &&
-				((this.scans >= 2 && this.pending.length === 0 && this.prev.size === 0) ||
-					this.scans > 300)
-			) {
+		const stopWatching = this.cfg.once ? null : this.watchDirs();
+		try {
+			while (!signal?.aborted) {
+				await this.tick(signal);
+				// -once: exit as soon as everything present is settled and shipped
+				// (or bail after ~5 min so a dead server can't loop forever)
+				if (
+					this.cfg.once &&
+					((this.scans >= 2 && this.pending.length === 0 && this.prev.size === 0) ||
+						this.scans > 300)
+				) {
+					return;
+				}
+				await this.idle(this.nextDelay(), signal);
+			}
+		} finally {
+			stopWatching?.();
+		}
+	}
+
+	/**
+	 * How long to wait before looking again. A file we have seen but not yet
+	 * accepted as settled needs a second look right after SETTLE_AGE — that is
+	 * the replay SC2 just finished writing, and it is the whole reason the app
+	 * exists, so it gets the short cadence. With nothing in flight there is
+	 * nothing to find until the watch says so.
+	 */
+	private nextDelay(): number {
+		if (this.cfg.once) return 1_000;
+		if (this.prev.size > 0 || this.pending.length > 0) return this.settle + 1_000;
+		return this.watching ? IDLE_SCAN_INTERVAL : SCAN_INTERVAL;
+	}
+
+	/**
+	 * Wakes the loop as soon as the OS says a replay folder changed, so a
+	 * finished game is picked up in seconds instead of on the next sweep.
+	 * Best-effort by design: anything the watch cannot cover (no inotify
+	 * budget left, a network share, a Wine prefix that reports nothing) simply
+	 * leaves `watching` false and keeps the old 30 s sweep.
+	 */
+	private watchDirs(): () => void {
+		const watchers: FSWatcher[] = [];
+		for (const dir of this.cfg.dirs) {
+			try {
+				const w = watch(dir, { persistent: false }, (_event, name) => {
+					// SC2 writes plenty of other things in there
+					if (name && !String(name).toLowerCase().endsWith('.sc2replay')) return;
+					this.touched();
+				});
+				w.on('error', () => {});
+				watchers.push(w);
+			} catch {
+				// unwatchable directory — the sweep still covers it
+			}
+		}
+		this.watching = watchers.length > 0 && watchers.length === this.cfg.dirs.length;
+		return () => {
+			this.watching = false;
+			if (this.debounce) clearTimeout(this.debounce);
+			this.debounce = null;
+			for (const w of watchers) w.close();
+		};
+	}
+
+	/**
+	 * A single write arrives as a burst of events, so they are coalesced: one
+	 * replay should cost one scan, not one per event. `dirty` covers the burst
+	 * landing while a scan is already running, where there is no idle to cut
+	 * short and the event would otherwise be lost until the next sweep.
+	 */
+	private touched(): void {
+		this.dirty = true;
+		if (this.debounce) return;
+		this.debounce = setTimeout(() => {
+			this.debounce = null;
+			this.wake?.();
+		}, 750);
+		this.debounce.unref?.();
+	}
+
+	/** sleep(ms), cut short by a watch event or an abort */
+	private idle(ms: number, signal?: AbortSignal): Promise<void> {
+		return new Promise((resolve) => {
+			if (this.dirty || signal?.aborted) {
+				this.dirty = false;
+				resolve();
 				return;
 			}
-			await sleep(interval, signal);
-		}
+			const done = () => {
+				clearTimeout(timer);
+				signal?.removeEventListener('abort', done);
+				this.wake = null;
+				this.dirty = false;
+				resolve();
+			};
+			const timer = setTimeout(done, ms);
+			this.wake = done;
+			signal?.addEventListener('abort', done);
+		});
 	}
 
 	async tick(signal?: AbortSignal): Promise<void> {
@@ -148,7 +253,7 @@ export class Watcher extends EventEmitter {
 					old &&
 					old.size === info.size &&
 					old.mtimeMs === info.mtimeMs &&
-					Date.now() - info.mtimeMs > SETTLE_AGE
+					Date.now() - info.mtimeMs > this.settle
 				) {
 					await this.classify(path, pendingShas);
 					this.prev.delete(path);

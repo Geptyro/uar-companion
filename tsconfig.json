@@ -10,5 +10,5 @@
 		"verbatimModuleSyntax": true,
 		"types": ["node"]
 	},
-	"include": ["src/**/*.ts", "tests/**/*.ts", "electron.vite.config.ts"]
+	"include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "electron.vite.config.ts"]
 }

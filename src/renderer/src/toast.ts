@@ -1,5 +1,6 @@
 import '@fontsource-variable/inter';
-import 'uar-shared/tokens.css';
+import 'sveltekit-commons/tokens.css';
+import 'uar-shared/palette.css';
 
 const params = new URLSearchParams(location.search);
 document.getElementById('title')!.textContent = params.get('title') ?? '';

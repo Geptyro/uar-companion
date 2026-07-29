@@ -58,12 +58,9 @@ import iconIcoProd from '../../resources/icon.ico?asset';
 import iconPngDev from '../../resources/icon-dev.png?asset';
 import iconIcoDev from '../../resources/icon-dev.ico?asset';
 
-// On Wayland, apps cannot position their own windows (the compositor
-// places them — KWin centers), so the tray-anchored custom toast is only
-// used on Windows/X11; Wayland sessions get an OS notification instead,
-// which KDE/GNOME anchor near the tray themselves. Forcing XWayland is NOT
-// an option: GPU acceleration segfaults there on some drivers and the
-// software presenter fails to map windows at all.
+// On Wayland, apps cannot position their own windows — the compositor places
+// them (KWin centers) — so a saved window position is junk there and must not
+// be written back (see saveBounds).
 const isWayland =
 	process.platform === 'linux' &&
 	(process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
@@ -110,9 +107,25 @@ if (process.platform === 'linux') {
 	);
 }
 
-if (!app.requestSingleInstanceLock()) {
-	app.quit();
-}
+/**
+ * The whole UI is a static list — no canvas, no video, no animation — so GPU
+ * acceleration buys it nothing and costs a GPU process holding a graphics
+ * device (a D3D device on Windows) for as long as the app sits in the tray.
+ * That device is contended with whatever game the user is actually playing,
+ * which is the entire point of a companion app: it must be invisible while
+ * the game runs. Software painting a list a few times a minute is free.
+ * Must be called before the app is ready.
+ */
+app.disableHardwareAcceleration();
+
+/**
+ * A second launch hands over to the running instance (see 'second-instance')
+ * and must do nothing else — app.quit() is asynchronous, so without this the
+ * loser would go on to build a tray, start a watcher and open sockets in the
+ * moments before it dies.
+ */
+const isPrimary = app.requestSingleInstanceLock();
+if (!isPrimary) app.quit();
 
 const userData = app.getPath('userData');
 const logPath = join(userData, 'uar-companion.log');
@@ -124,7 +137,6 @@ let watcher: Watcher | null = null;
 let abort: AbortController | null = null;
 let sseAbort: AbortController | null = null;
 let store: Store;
-let quitting = false;
 let readyState = {
 	count: 0,
 	names: [] as string[],
@@ -134,6 +146,9 @@ let readyState = {
 let me: Me | null = null;
 let meReady = false;
 let meUntil: string | null = null;
+/** a release newer than ours exists, and nothing has been fetched yet */
+let updateAvailable: string | null = null;
+/** downloaded and staged — the restart is all that is left */
 let updateVersion: string | null = null;
 let updateDownloading: string | null = null;
 let sc2: SC2Presence | null = null;
@@ -186,6 +201,7 @@ function snapshot() {
 		me,
 		meReady,
 		meUntil,
+		updateAvailable,
 		updateVersion,
 		updateDownloading,
 		sc2,
@@ -202,13 +218,27 @@ function snapshot() {
 	};
 }
 
+/** last payload actually sent, so an unchanged 60 s poll wakes nobody */
+let lastPush = '';
+
 function pushUpdate(): void {
-	win?.webContents.send('update', snapshot());
+	if (win && !win.isDestroyed()) {
+		const snap = snapshot();
+		const key = JSON.stringify(snap);
+		if (key !== lastPush) {
+			lastPush = key;
+			win.webContents.send('update', snap);
+		}
+	}
 	refreshTray();
 }
 
 function notify(title: string, body: string): void {
-	if (Notification.isSupported()) new Notification({ title, body, icon: iconPng }).show();
+	if (!Notification.isSupported()) return;
+	const n = new Notification({ title, body, icon: iconPng });
+	// same gesture as the custom toast: the news is only useful next to the site
+	n.on('click', () => void shell.openExternal(server()));
+	n.show();
 }
 
 function startWatcher(): void {
@@ -373,35 +403,56 @@ async function sseLoop(): Promise<void> {
 let toastWin: BrowserWindow | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * The OS notification service is the right home for these on every platform
+ * that has one: it already anchors near the tray (the reason the custom
+ * window existed), it costs us no window, and — the reason this changed —
+ * an always-on-top transparent window drawn over a running game pulls the
+ * game out of fullscreen on Windows, which players feel as a freeze of a
+ * second or more. A companion has no business doing that to the game it is a
+ * companion to; the OS knows when to hold a notification back instead
+ * (Focus Assist, Do Not Disturb) and we want it to.
+ */
 function showToast(title: string, sub: string): void {
-	if (isWayland) {
-		// the compositor's notification system is the only thing allowed to
-		// anchor near the tray on Wayland
-		log(`ready notification (wayland): ${title}`);
+	if (Notification.isSupported()) {
+		log(`notification: ${title}`);
 		notify(title, sub);
 		return;
 	}
+	showToastWindow(title, sub);
+}
+
+/**
+ * Fallback for a desktop with no notification daemon at all (bare X11 without
+ * one, mostly). Kept to a single window that is reused and hidden rather than
+ * created and destroyed per toast — each creation was an entire renderer
+ * process, spawned at exactly the moment the user was busy elsewhere.
+ */
+function showToastWindow(title: string, sub: string): void {
 	const W = 340;
 	const H = 92;
-	toastWin?.destroy();
 	if (toastTimer) clearTimeout(toastTimer);
-	const toast = new BrowserWindow({
-		width: W,
-		height: H,
-		frame: false,
-		transparent: true,
-		resizable: false,
-		movable: false,
-		focusable: false,
-		alwaysOnTop: true,
-		skipTaskbar: true,
-		show: false,
-		webPreferences: {
-			preload: join(import.meta.dirname, '../preload/index.mjs'),
-			sandbox: false
-		}
-	});
-	toast.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+	if (!toastWin || toastWin.isDestroyed()) {
+		toastWin = new BrowserWindow({
+			width: W,
+			height: H,
+			frame: false,
+			transparent: true,
+			resizable: false,
+			movable: false,
+			focusable: false,
+			alwaysOnTop: true,
+			skipTaskbar: true,
+			show: false,
+			webPreferences: {
+				preload: join(import.meta.dirname, '../preload/index.mjs'),
+				sandbox: false
+			}
+		});
+		toastWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+		toastWin.on('closed', () => (toastWin = null));
+	}
+	const toast = toastWin;
 	toast.setBounds({ ...toastPosition(W, H), width: W, height: H });
 	const query = { title, sub };
 	if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
@@ -419,17 +470,9 @@ function showToast(title: string, sub: string): void {
 	toast.once('ready-to-show', reveal);
 	toast.webContents.once('did-finish-load', () => setTimeout(reveal, 30));
 	setTimeout(reveal, 800);
-	setTimeout(() => {
-		if (!toast.isDestroyed()) {
-			const b = toast.getBounds();
-			log(`toast "${title}" visible: ${toast.isVisible()} at ${b.x},${b.y}`);
-		}
-	}, 1500);
-	toast.on('closed', () => {
-		if (toastWin === toast) toastWin = null;
-	});
-	toastWin = toast;
-	toastTimer = setTimeout(() => toast.destroy(), 6_000);
+	toastTimer = setTimeout(() => {
+		if (!toast.isDestroyed()) toast.hide();
+	}, 6_000);
 }
 
 /** Right above the tray icon when the OS tells us where it is, else just
@@ -484,7 +527,7 @@ function refreshTray(): void {
 	const status = watcher?.statusLine ?? 'Starting…';
 	const ready = readyState.ok ? String(readyState.count) : '–';
 	const paused = watcher?.paused ?? false;
-	const key = `${status}|${ready}|${paused}|${me?.battletag ?? ''}|${meReady}|${updateVersion ?? ''}`;
+	const key = `${status}|${ready}|${paused}|${me?.battletag ?? ''}|${meReady}|${updateVersion ?? ''}|${updateDownloading ?? ''}|${updateAvailable ?? ''}`;
 	if (key === lastMenuKey) return;
 	lastMenuKey = key;
 	tray.setContextMenu(
@@ -503,13 +546,14 @@ function refreshTray(): void {
 				? [
 						{
 							label: `Restart to update to v${updateVersion}`,
-							click: () => {
-								quitting = true;
-								electronUpdater.autoUpdater.quitAndInstall();
-							}
+							click: () => electronUpdater.autoUpdater.quitAndInstall()
 						}
 					]
-				: []),
+				: updateDownloading
+					? [{ label: `Downloading v${updateDownloading}…`, enabled: false }]
+					: updateAvailable
+						? [{ label: `Download update v${updateAvailable}`, click: downloadUpdate }]
+						: []),
 			{ type: 'separator' },
 			{ label: 'Open UAR Companion', click: showWindow },
 			{ label: 'Open website', click: () => void shell.openExternal(server()) },
@@ -526,10 +570,7 @@ function refreshTray(): void {
 			{ type: 'separator' },
 			{
 				label: 'Quit',
-				click: () => {
-					quitting = true;
-					app.quit();
-				}
+				click: () => app.quit()
 			}
 		])
 	);
@@ -542,6 +583,9 @@ function refreshTray(): void {
 
 function showWindow(): void {
 	if (!win) {
+		// a fresh renderer reads the snapshot on mount, so the diff in
+		// pushUpdate starts from nothing known
+		lastPush = '';
 		const placed = windowPlacement(
 			config.window,
 			screen.getAllDisplays().map((d) => d.workArea)
@@ -584,14 +628,15 @@ function showWindow(): void {
 				void shell.openExternal(url);
 			}
 		});
-		win.on('close', (e) => {
-			// last chance to persist the size, whether we are hiding or quitting
+		win.on('close', () => {
+			// last chance to persist the size, whether we are closing or quitting
 			saveBounds();
-			// closing the window leaves the app in the tray; Quit lives there
-			if (!quitting) {
-				e.preventDefault();
-				win?.hide();
-			}
+			// The window is genuinely destroyed rather than hidden: a hidden one
+			// kept its renderer resident (~190 MB) and the GPU process warm for
+			// days, to show nobody anything. Rebuilding it on the next tray click
+			// costs a few hundred ms and the renderer re-reads the snapshot on
+			// mount, so nothing is lost. The app itself lives in the tray;
+			// window-all-closed deliberately does not quit.
 		});
 		win.on('closed', () => (win = null));
 		if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
@@ -806,13 +851,16 @@ function wireIpc(): void {
 		void shell.openExternal('https://github.com/Geptyro/uar-companion')
 	);
 	ipcMain.handle('open-log', () => void shell.openPath(logPath));
+	ipcMain.handle('download-update', () => {
+		downloadUpdate();
+		return snapshot();
+	});
 	ipcMain.handle('install-update', () => {
 		if (!updateVersion) return;
 		if (process.env.UAR_COMPANION_TEST_UPDATE) {
 			log(`install-update clicked (test hook, would install v${updateVersion})`);
 			return;
 		}
-		quitting = true;
 		electronUpdater.autoUpdater.quitAndInstall();
 	});
 	ipcMain.handle('login', async () => {
@@ -924,19 +972,40 @@ function onSC2Change(presence: SC2Presence | null): void {
 	pushUpdate();
 }
 
+/**
+ * Downloads the pending release. Deliberately not automatic: the artifact is
+ * north of 100 MB, and pulling it at full speed the moment a release lands is
+ * felt as lag in whatever the user is playing — the one thing a companion
+ * must never cause. So the app says an update is there and the user picks the
+ * moment; autoInstallOnAppQuit then applies it without a second gesture.
+ */
+function downloadUpdate(): void {
+	if (!updateAvailable || updateDownloading || updateVersion) return;
+	updateDownloading = updateAvailable;
+	log(`downloading update v${updateAvailable}`);
+	pushUpdate();
+	void electronUpdater.autoUpdater.downloadUpdate().catch((e: Error) => {
+		updateDownloading = null;
+		log(`update download failed: ${e.message}`);
+		pushUpdate();
+	});
+}
+
 function initAutoUpdate(): void {
 	// unsigned macOS builds cannot auto-update (Squirrel.Mac requires signing)
 	if (!app.isPackaged || process.platform === 'darwin') return;
 	const { autoUpdater } = electronUpdater;
-	autoUpdater.autoDownload = true;
+	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
 	autoUpdater.on('update-available', (info) => {
-		updateDownloading = info.version;
-		log(`update v${info.version} available — downloading`);
+		if (updateAvailable === info.version) return;
+		updateAvailable = info.version;
+		log(`update v${info.version} available`);
 		pushUpdate();
 	});
 	autoUpdater.on('update-downloaded', (info) => {
 		updateDownloading = null;
+		updateAvailable = null;
 		updateVersion = info.version;
 		log(`update v${info.version} downloaded — restart to apply`);
 		pushUpdate();
@@ -951,12 +1020,12 @@ function initAutoUpdate(): void {
 		// until the restart: checkForUpdates would find the same version
 		// (isUpdateAvailable compares against the running one), take the
 		// cached file, and re-fire update-downloaded on every tick
-		if (updateVersion) return;
+		if (updateVersion || updateDownloading) return;
 		void autoUpdater.checkForUpdates().catch(() => {});
 	};
 	check();
 	// the app normally sits in the tray for days on end, so this interval —
-	// not a relaunch — is what actually gets a release onto a running install
+	// not a relaunch — is what actually notices a release on a running install
 	setInterval(check, 10 * 60 * 1000);
 }
 
@@ -965,7 +1034,6 @@ app.on('window-all-closed', () => {
 	// tray app: stay alive with no windows
 });
 app.on('before-quit', () => {
-	quitting = true;
 	abort?.abort();
 	sseAbort?.abort();
 	stopSC2?.();
@@ -974,6 +1042,7 @@ app.on('before-quit', () => {
 });
 
 void app.whenReady().then(() => {
+	if (!isPrimary) return;
 	app.setAppUserModelId('dev.cedricdessalles.uar-companion');
 	// test/dev hook: pin the theme regardless of the OS setting
 	if (process.env.UAR_COMPANION_THEME === 'light' || process.env.UAR_COMPANION_THEME === 'dark') {

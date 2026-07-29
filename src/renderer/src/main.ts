@@ -1,7 +1,8 @@
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
-import 'uar-shared/tokens.css';
-import 'uar-shared/base.css';
+import 'sveltekit-commons/tokens.css';
+import 'uar-shared/palette.css';
+import 'sveltekit-commons/base.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 

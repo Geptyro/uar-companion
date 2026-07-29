@@ -146,3 +146,43 @@ test('oversized file is skipped before any network call', async () => {
 		server.close();
 	}
 });
+
+/**
+ * A replay used to wait for the next 30 s sweep. The directories are under an
+ * fs.watch now, so a finished game is noticed as it lands — which is also what
+ * lets the fallback sweep drop to five minutes and stop dragging every replay
+ * folder through Defender (and OneDrive) twice a minute.
+ */
+test('a replay dropped in is picked up from the watch, not the sweep', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'uar-companion-watch-'));
+	const { server, url, posts } = await fakeServer(() => ({
+		status: 200,
+		body: '{"ok":true,"message":"accepted"}'
+	}));
+	const abort = new AbortController();
+	const w = new Watcher(
+		{ dirs: [dir], postSpacing: 1, settleAge: 40 },
+		new Client(url, 'test'),
+		new Store(join(dir, 'state'))
+	);
+	const uploaded = new Promise<void>((resolve) =>
+		w.on('event', (e: { kind: string }) => {
+			if (e.kind === 'uploaded') resolve();
+		})
+	);
+	try {
+		const started = Date.now();
+		const loop = w.run(abort.signal);
+		// let the first sweep find an empty folder and settle into its long idle
+		await new Promise((r) => setTimeout(r, 100));
+		copyFileSync(FIXTURE, join(dir, 'Undead Assault reborn.SC2Replay'));
+		await uploaded;
+		// the idle it cut short was IDLE_SCAN_INTERVAL — five whole minutes
+		assert.ok(Date.now() - started < 10_000, 'did not wait for a sweep');
+		assert.equal(posts(), 1);
+		abort.abort();
+		await loop;
+	} finally {
+		server.close();
+	}
+});
