@@ -6,8 +6,19 @@ on:
   pull_request:
 
 jobs:
+  # Every OS the app ships to, because this suite touches the parts of Node
+  # that differ between them. v0.7.0 added an fs.watch, and its first Windows
+  # run died on a libuv assert (fs-event.c — an 8.3 short path never matches
+  # the long one the OS reports back): abort(), no exception, nothing
+  # catchable. Ubuntu passed it happily, so the crash surfaced only once a tag
+  # existed, twice over. Three runners a push is the cheaper half of that.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # one platform failing must not hide what the other two would have said
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
