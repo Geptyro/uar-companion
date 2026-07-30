@@ -1,7 +1,7 @@
 {
 	"name": "uar-companion",
 	"productName": "UAR Companion",
-	"version": "0.7.1",
+	"version": "0.8.0",
 	"description": "Undead Assault Reborn companion: auto-uploads your SC2 replays to uar.cedricdessalles.dev and shows who is ready to play",
 	"type": "module",
 	"main": "./out/main/index.js",
