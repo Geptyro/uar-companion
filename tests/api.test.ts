@@ -19,13 +19,26 @@ test('parseReadyRoster: own flag and player defaults', () => {
 		me: true,
 		until: '2026-01-01T01:00:00Z',
 		players: [
-			{ battletag: 'A#1', avatar: 'https://x/a.jpg', until: '2026-01-01T01:00:00Z' },
+			{
+				battletag: 'A#1',
+				name: 'Alpha',
+				avatar: 'https://x/a.jpg',
+				until: '2026-01-01T01:00:00Z'
+			},
 			{ battletag: 'B#2', until: '2026-01-01T02:00:00Z' }
 		]
 	});
 	assert.equal(r.meReady, true);
 	assert.equal(r.meUntil, '2026-01-01T01:00:00Z');
-	assert.deepEqual(r.players[1], { battletag: 'B#2', avatar: null, until: '2026-01-01T02:00:00Z' });
+	// the profile name is what the rows show; an account the site could not
+	// resolve one for falls back to the battletag
+	assert.equal(r.players[0].name, 'Alpha');
+	assert.deepEqual(r.players[1], {
+		battletag: 'B#2',
+		name: null,
+		avatar: null,
+		until: '2026-01-01T02:00:00Z'
+	});
 
 	assert.deepEqual(parseReadyRoster({}), { meReady: false, meUntil: null, players: [] });
 	assert.deepEqual(parseReadyRoster({ me: false, until: null, players: [] }).meReady, false);
@@ -35,11 +48,19 @@ test('parsePresenceList: entries with defaults, empty bodies', () => {
 	const list = parsePresenceList({
 		players: [
 			{ battletag: 'A#1', status: 'ingame', uar: true, players: 12, displayTime: 300 },
-			{ battletag: 'B#2', avatar: 'https://x/b.jpg', toon: 't', status: 'lobby', uar: false }
+			{
+				battletag: 'B#2',
+				name: 'Bravo',
+				avatar: 'https://x/b.jpg',
+				toon: 't',
+				status: 'lobby',
+				uar: false
+			}
 		]
 	});
 	assert.deepEqual(list[0], {
 		battletag: 'A#1',
+		name: null,
 		avatar: null,
 		toon: null,
 		status: 'ingame',
@@ -51,6 +72,7 @@ test('parsePresenceList: entries with defaults, empty bodies', () => {
 		selfName: undefined
 	});
 	assert.equal(list[1].status, 'lobby');
+	assert.equal(list[1].name, 'Bravo');
 	assert.deepEqual(parsePresenceList({}), []);
 	assert.deepEqual(parsePresenceList(null), []);
 });

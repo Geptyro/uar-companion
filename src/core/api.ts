@@ -15,11 +15,13 @@ export interface Me {
 export interface ReadyRoster {
 	meReady: boolean;
 	meUntil: string | null;
-	players: { battletag: string; avatar: string | null; until: string }[];
+	players: { battletag: string; name: string | null; avatar: string | null; until: string }[];
 }
 
 export interface PresenceEntry {
 	battletag: string;
+	/** SC2 profile name of `toon` — shown instead of the battletag. */
+	name: string | null;
 	avatar: string | null;
 	toon: string | null;
 	status: 'lobby' | 'ingame';
@@ -44,13 +46,14 @@ export function parseReadyRoster(body: unknown): ReadyRoster {
 	const b = body as {
 		me?: boolean;
 		until?: string | null;
-		players?: { battletag: string; avatar?: string | null; until: string }[];
+		players?: { battletag: string; name?: string | null; avatar?: string | null; until: string }[];
 	};
 	return {
 		meReady: b?.me === true,
 		meUntil: b?.until ?? null,
 		players: (b?.players ?? []).map((p) => ({
 			battletag: p.battletag,
+			name: p.name ?? null,
 			avatar: p.avatar ?? null,
 			until: p.until
 		}))
@@ -94,6 +97,7 @@ export function parsePresenceList(body: unknown): PresenceEntry[] {
 function parsePresenceEntry(p: PresenceEntry): PresenceEntry {
 	return {
 		battletag: p.battletag,
+		name: p.name ?? null,
 		avatar: p.avatar ?? null,
 		toon: p.toon ?? null,
 		status: p.status,

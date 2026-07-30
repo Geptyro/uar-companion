@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+	bareProfileName,
 	derivePresence,
 	isUarBattleLobby,
 	parseBattleLobby,
@@ -111,6 +112,21 @@ test('real battlelobby capture yields uar + lobbyId + battletags', () => {
 		battletags: ['Kanax#2515'],
 		members: [{ profile: 'KanaxStratz#451', battletag: 'Kanax#2515' }]
 	});
+});
+
+test('a lobby roster goes out bare, spelled like the in-game one', () => {
+	const info = parseBattleLobby(
+		readFileSync(new URL('../testdata/battlelobby-solo.bin', import.meta.url))
+	);
+	// the file says "KanaxStratz#451"; /game and the website both say
+	// "KanaxStratz" (see the derivePresence case above). Sending the code
+	// meant no roster line ever matched the reporter who sent it, and the
+	// site listed every one of them twice — once by name, once by battletag
+	assert.deepEqual(
+		info.members?.map((m) => bareProfileName(m.profile)),
+		['KanaxStratz']
+	);
+	assert.equal(bareProfileName('KanaxStratz'), 'KanaxStratz', 'already bare: untouched');
 });
 
 test('12-player battlelobby capture: id + full roster (captured 2026-07-26)', () => {

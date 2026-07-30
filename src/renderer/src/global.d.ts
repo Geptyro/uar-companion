@@ -12,7 +12,7 @@ export interface Snapshot {
 	ready: {
 		count: number;
 		names: string[];
-		players: { battletag: string; avatar: string | null; until: string }[];
+		players: { battletag: string; name: string | null; avatar: string | null; until: string }[];
 		ok: boolean;
 	};
 	me: { battletag: string; avatar: string | null; toon: string | null } | null;

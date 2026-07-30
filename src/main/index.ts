@@ -49,7 +49,7 @@ import {
 	type PresenceEntry,
 	type PresenceSplit
 } from './auth.ts';
-import { watchSC2, type SC2Presence } from '../core/sc2.ts';
+import { bareProfileName, watchSC2, type SC2Presence } from '../core/sc2.ts';
 import { decideLobbyToast, listNames, NO_LOBBY_TOAST, type LobbyToastState } from '../core/lobby.ts';
 import { splitPresence } from 'uar-shared/presence';
 import { readFileSync } from 'node:fs';
@@ -140,7 +140,7 @@ let store: Store;
 let readyState = {
 	count: 0,
 	names: [] as string[],
-	players: [] as { battletag: string; avatar: string | null; until: string }[],
+	players: [] as { battletag: string; name: string | null; avatar: string | null; until: string }[],
 	ok: false
 };
 let me: Me | null = null;
@@ -159,8 +159,12 @@ let presenceList: PresenceEntry[] | null = null;
 /** the site's own grouping of that list; null when it sent none (old server) */
 let presenceGroups: PresenceSplit | null = null;
 let presenceKnown: Record<string, { toon: string; avatar?: string }> = {};
-/** null until the first successful fetch — no toasts for the initial roster */
-let knownReady: Map<string, string> | null = null;
+/**
+ * Battletag -> flag, from the last fetch; null until the first successful one,
+ * so the initial roster toasts nothing. Keyed by the account and not by the
+ * profile name it displays: names are neither unique nor permanent.
+ */
+let knownReady: Map<string, { name: string | null; until: string }> | null = null;
 /** as above for the lobby: baseline from the first fetch, plus flap state */
 let lobbyToast: LobbyToastState = NO_LOBBY_TOAST;
 let lastMenuKey = '';
@@ -281,7 +285,7 @@ async function pollReady(): Promise<void> {
 		announceReadyChanges(r.players, r.players.length);
 		readyState = {
 			count: r.players.length,
-			names: r.players.map((p) => p.battletag),
+			names: r.players.map((p) => p.name ?? p.battletag),
 			players: r.players,
 			ok: true
 		};
@@ -334,29 +338,43 @@ function announceLobbyChanges(lobbies: PresenceSplit['lobbies']): void {
 	});
 	lobbyToast = state;
 	if (toast === null) return;
+	// battletags identify the lobby (and the log); the headline reads out the
+	// profile names, which is how these players know each other
 	log(`lobby toast: ${toast.join(', ')}`);
+	const shown = new Map(
+		(lobbies[0]?.members ?? []).map((m) => [m.battletag, m.name ?? m.battletag])
+	);
+	const named = toast.map((t) => shown.get(t) ?? t);
 	showToast(
-		`${listNames(toast)} ${toast.length === 1 ? 'is' : 'are'} in a lobby`,
+		`${listNames(named)} ${toast.length === 1 ? 'is' : 'are'} in a lobby`,
 		`Open ${server().replace(/^https?:\/\//, '')} to see who joins`
 	);
 }
 
 /** Toasts set/unset diffs against the last seen roster (never the first one). */
-function announceReadyChanges(players: { battletag: string; until: string }[], count: number): void {
-	const next = new Map(players.map((p) => [p.battletag, p.until]));
+function announceReadyChanges(
+	players: { battletag: string; name: string | null; until: string }[],
+	count: number
+): void {
+	const next = new Map(players.map((p) => [p.battletag, { name: p.name, until: p.until }]));
 	const prev = knownReady;
 	knownReady = next;
 	if (prev === null || !config.notifyReady) return;
+	// the SC2 profile name is the one people know each other by; a battletag
+	// only shows for an account whose profile the site could not resolve
+	const label = (tag: string, p: { name: string | null }) => p.name ?? tag;
 	// own toggles come from our own click — no need to announce them
-	const added = [...next.keys()].filter((n) => !prev.has(n) && n !== me?.battletag);
+	const added = [...next.entries()]
+		.filter(([n]) => !prev.has(n) && n !== me?.battletag)
+		.map(([n, p]) => label(n, p));
 	// a flag that vanished while its `until` was still comfortably in the
 	// future was unset by the player; anything else just expired — stay quiet
 	const removed = [...prev.entries()]
 		.filter(
-			([n, until]) =>
-				!next.has(n) && n !== me?.battletag && Date.parse(until) > Date.now() + 60_000
+			([n, p]) =>
+				!next.has(n) && n !== me?.battletag && Date.parse(p.until) > Date.now() + 60_000
 		)
-		.map(([n]) => n);
+		.map(([n, p]) => label(n, p));
 	if (added.length === 0 && removed.length === 0) return;
 	const list = (names: string[]) =>
 		names.length <= 2 ? names.join(' and ') : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
@@ -912,9 +930,8 @@ async function heartbeat(): Promise<void> {
 		const { members, ...rest } = sc2;
 		// the lobby file carries "Name#123", the in-game roster only "Name" —
 		// send the bare name so it lines up with the roster entries
-		const selfName = members
-			?.find((m) => m.battletag === account.battletag)
-			?.profile.replace(/#\d+$/, '');
+		const profile = members?.find((m) => m.battletag === account.battletag)?.profile;
+		const selfName = profile ? bareProfileName(profile) : undefined;
 		beat = selfName ? { ...rest, selfName } : rest;
 	}
 	const status = await sendPresence(server(), beat);

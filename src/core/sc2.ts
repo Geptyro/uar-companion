@@ -77,6 +77,18 @@ export interface BattleLobbyInfo {
 	members?: { profile: string; battletag: string }[];
 }
 
+/**
+ * A profile name without the character code the battlelobby file appends
+ * ("KanaxStratz#451" -> "KanaxStratz"). The SC2 client's own roster and the
+ * website's player pages both use the bare form, so anything leaving this
+ * app does too. Kept here rather than taken from uar-shared: core stays
+ * installable-free of the UI package, and one regex is not worth a release
+ * ordering between the two repos.
+ */
+export function bareProfileName(profile: string): string {
+	return profile.replace(/#\d+$/, '');
+}
+
 /** 01 00 00/01 00 markers follow most zero-padding runs — never an id. */
 const RUN_MARKERS = new Set([0x01000000, 0x01000100]);
 
@@ -246,8 +258,12 @@ export function watchSC2(
 				// lobby rosters use the in-game profile names, like the
 				// in-game roster does — consistent for the UI, and less
 				// exposing than the account battletags of people who never
-				// installed anything
-				const names = eff.members?.map((m) => m.profile) ?? eff.battletags;
+				// installed anything. Without the character code the file
+				// carries ("Name#451"): the in-game roster and the site's
+				// player pages both spell a profile bare, and sending the
+				// code meant no roster line ever matched a reporter, so the
+				// site listed everyone twice — once by name, once by tag.
+				const names = eff.members?.map((m) => bareProfileName(m.profile)) ?? eff.battletags;
 				if (presence.status === 'lobby' && names.length > 0) {
 					presence.players = names.length;
 					presence.roster = names;
