@@ -18,7 +18,13 @@
 	} = $props();
 
 	function toggle(
-		key: 'noBackfill' | 'notifyUploads' | 'notifyReady' | 'notifyLobby' | 'autostart'
+		key:
+			| 'noBackfill'
+			| 'notifyUploads'
+			| 'notifyReady'
+			| 'notifyLobby'
+			| 'notifyInGame'
+			| 'autostart'
 	) {
 		return act(() => window.uarCompanion.setConfig({ [key]: !snap.config[key] }));
 	}
@@ -81,10 +87,17 @@
 					onchange={() => toggle('notifyUploads')}
 					label="Notify when a replay is uploaded"
 				/>
+				<Toggle
+					checked={snap.config.notifyInGame}
+					onchange={() => toggle('notifyInGame')}
+					label="Also notify while I'm in a lobby or a game"
+				/>
 			</div>
 			<p class="note m0 small hint">
-				These are your desktop's own notifications, so whatever you have set for games —
-				Focus Assist, Do Not Disturb — holds them back while you play.
+				That last one is off to begin with: while you are in a lobby or a game the app stays
+				quiet, because an interruption costs the most exactly then. These are your desktop's
+				own notifications too, so whatever you have set for games — Focus Assist, Do Not
+				Disturb — holds them back while you play.
 			</p>
 		</Card>
 	</section>

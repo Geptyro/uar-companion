@@ -217,6 +217,7 @@ function snapshot() {
 			notifyUploads: config.notifyUploads,
 			notifyReady: config.notifyReady,
 			notifyLobby: config.notifyLobby,
+			notifyInGame: config.notifyInGame,
 			autostart: config.autostart
 		}
 	};
@@ -237,8 +238,22 @@ function pushUpdate(): void {
 	refreshTray();
 }
 
+/**
+ * A lobby or a game is exactly where an interruption costs the most — the
+ * moment the app is a companion to — so nothing is shown there unless the
+ * user opts in. Held back, not queued: who was ready ten minutes ago is not
+ * news when the game ends, and the site shows the current roster anyway.
+ * Silent while SC2 is not running, or on a server that never told us
+ * (sc2 === null).
+ */
+function heldBack(title: string): boolean {
+	if (config.notifyInGame || sc2 === null || sc2.status === 'menus') return false;
+	log(`notification held back (in a ${sc2.status === 'ingame' ? 'game' : 'lobby'}): ${title}`);
+	return true;
+}
+
 function notify(title: string, body: string): void {
-	if (!Notification.isSupported()) return;
+	if (heldBack(title) || !Notification.isSupported()) return;
 	const n = new Notification({ title, body, icon: iconPng });
 	// same gesture as the custom toast: the news is only useful next to the site
 	n.on('click', () => void shell.openExternal(server()));
@@ -432,6 +447,9 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
  * (Focus Assist, Do Not Disturb) and we want it to.
  */
 function showToast(title: string, sub: string): void {
+	// checked here too: the fallback window below never goes through notify(),
+	// and an always-on-top window over a running game is the worst offender
+	if (heldBack(title)) return;
 	if (Notification.isSupported()) {
 		log(`notification: ${title}`);
 		notify(title, sub);

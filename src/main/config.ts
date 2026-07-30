@@ -10,6 +10,8 @@ export interface AppConfig {
 	notifyReady: boolean;
 	/** Toast when a lobby forms on the site (see announceLobbyChanges). */
 	notifyLobby: boolean;
+	/** Opt-in: keep notifying while SC2 says we are in a lobby or a game. */
+	notifyInGame: boolean;
 	autostart: boolean;
 	/** Override for development; empty = production site. */
 	server: string;
@@ -35,6 +37,7 @@ const DEFAULTS: AppConfig = {
 	notifyUploads: true,
 	notifyReady: true,
 	notifyLobby: true,
+	notifyInGame: false,
 	autostart: false,
 	server: '',
 	firstRunDone: false

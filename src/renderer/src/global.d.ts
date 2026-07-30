@@ -41,6 +41,7 @@ export interface Snapshot {
 		notifyUploads: boolean;
 		notifyReady: boolean;
 		notifyLobby: boolean;
+		notifyInGame: boolean;
 		autostart: boolean;
 	};
 }
