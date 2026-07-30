@@ -52,6 +52,17 @@ export interface ParsedEntry {
 	body: string;
 }
 
+/**
+ * `'x'` and `"x"` -> `x`; anything else, including `'a' and 'b'`, untouched.
+ *
+ * Demanding no same-quote inside is what keeps `'a' and 'b'` from being
+ * greedily unwrapped to `a' and 'b`. `lintEntry` reports what is left quoted.
+ */
+function unquote(value: string): string {
+	const m = value.match(/^'([^']*)'$/) ?? value.match(/^"([^"]*)"$/);
+	return m ? m[1] : value;
+}
+
 export function parseEntry(raw: string): ParsedEntry {
 	const meta: Record<string, string> = {};
 	let body = raw;
@@ -61,7 +72,7 @@ export function parseEntry(raw: string): ParsedEntry {
 		for (const line of fm[1].split(/\r?\n/)) {
 			const kv = line.match(/^(\w+):\s*(.*)$/);
 			// a title with a colon in it is quoted in the file
-			if (kv) meta[kv[1]] = kv[2].trim().replace(/^'(.*)'$/, '$1').replace(/^"(.*)"$/, '$1');
+			if (kv) meta[kv[1]] = unquote(kv[2].trim());
 		}
 	}
 	const type = (ENTRY_TYPES as readonly string[]).includes(meta.type ?? '')
@@ -74,6 +85,78 @@ export function parseEntry(raw: string): ParsedEntry {
 		? (meta.impact as EntryImpact)
 		: 'normal';
 	return { title: meta.title ?? '', type, area, impact, body: body.trim() };
+}
+
+/** One thing wrong with one entry file. `field` is a frontmatter key, or `frontmatter`/`body`. */
+export interface ChangelogProblem {
+	field: string;
+	message: string;
+}
+
+const KNOWN_KEYS = ['title', 'type', 'area', 'impact'];
+
+/**
+ * Everything wrong with an entry, empty when it is clean.
+ *
+ * The counterpart to `parseEntry`'s forgiveness: it falls back rather than
+ * throwing, because a changelog entry must never be the thing that fails a
+ * build — which also means a typo reaches the Changelog pane silently, filed
+ * under whatever sits first in the list. `tests/changelog-entries.test.ts` runs
+ * this over every committed entry so it does not.
+ *
+ * Kept in step with `sveltekit-commons/changelog`'s `lintEntry`, one difference:
+ * this app has no router, so only `https://` links render here.
+ */
+export function lintEntry(raw: string): ChangelogProblem[] {
+	const problems: ChangelogProblem[] = [];
+	const meta: Record<string, string> = {};
+	const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+	if (!fm) {
+		return [{ field: 'frontmatter', message: 'no `---` frontmatter block — the whole file reads as body' }];
+	}
+	for (const line of fm[1].split(/\r?\n/)) {
+		const kv = line.match(/^(\w+):\s*(.*)$/);
+		if (kv) meta[kv[1]] = unquote(kv[2].trim());
+	}
+	const body = raw.slice(fm[0].length);
+
+	for (const key of Object.keys(meta)) {
+		if (!KNOWN_KEYS.includes(key)) {
+			problems.push({ field: key, message: `unknown field (expected one of ${KNOWN_KEYS.join(', ')}) — it is ignored, so whatever it was meant to set kept its default` });
+		}
+	}
+
+	if (!meta.title) {
+		problems.push({ field: 'title', message: 'missing or empty — the entry falls back to its filename as the headline' });
+	} else if (/^['"]/.test(meta.title) && /['"]$/.test(meta.title)) {
+		problems.push({ field: 'title', message: `still quoted after unwrapping (\`${meta.title}\`) — a quote of the same kind inside blocks it, so the outer pair renders as part of the headline` });
+	}
+
+	for (const [field, allowed] of [
+		['type', ENTRY_TYPES],
+		['area', ENTRY_AREAS]
+	] as const) {
+		const value = meta[field];
+		const list = (allowed as readonly string[]).join(', ');
+		if (!value) problems.push({ field, message: `missing (expected one of ${list})` });
+		else if (!(allowed as readonly string[]).includes(value)) {
+			problems.push({ field, message: `\`${value}\` is not one of ${list} — it silently becomes \`${field === 'type' ? 'improvement' : 'window'}\`` });
+		}
+	}
+
+	if (meta.impact && !(ENTRY_IMPACTS as readonly string[]).includes(meta.impact)) {
+		problems.push({ field: 'impact', message: `\`${meta.impact}\` is not one of ${ENTRY_IMPACTS.join(', ')} — it silently becomes \`normal\`` });
+	}
+
+	if (!body.trim()) problems.push({ field: 'body', message: 'empty — the entry renders as a headline with nothing under it' });
+
+	for (const [, label, href] of body.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)) {
+		if (!/^https?:\/\//.test(href)) {
+			problems.push({ field: 'body', message: `link [${label}](${href}) is not absolute — the app has no router to follow a relative one, so it renders as literal brackets` });
+		}
+	}
+
+	return problems;
 }
 
 function escapeHtml(s: string): string {

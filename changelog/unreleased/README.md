@@ -31,4 +31,12 @@ only — the app has no router to follow a relative one).
   `minor` = nobody would notice unless told, listed compactly at the bottom of
   the release. Omit for everything in between.
 
-A title with a colon in it must be quoted: `title: 'Fixed: the thing'`.
+A title with a colon in it may be quoted: `title: 'Fixed: the thing'`. Quoting
+is optional either way — the value keeps everything after the first `:` — but a
+title that both starts and ends with the same quote character it also contains
+cannot be unwrapped, and keeps the outer pair in the headline.
+
+`npm run changelog:check` lints every entry (`npm test` runs it too). Worth
+running after writing one: the parser deliberately never fails a build over an
+entry, so an off-schema `type`/`area` would otherwise file the change under the
+wrong heading without a word.
