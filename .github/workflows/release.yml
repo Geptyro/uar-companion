@@ -4,6 +4,18 @@ on:
   push:
     tags: ['v*']
 
+# Read-only by default so a compromised step in the build matrix — a postinstall
+# script, a transitive dep, an action that changed under a mutable tag — cannot
+# reach the releases API. Only the `release` job below opts back into write, and
+# only for the three scopes it actually needs.
+permissions:
+  contents: read
+
+# Actions are pinned to commit SHAs, not tags: `@v4` is a branch-like pointer
+# the upstream owner can move at any time, and this workflow is the one place
+# where moving it would mean arbitrary code running next to the publish token.
+# The trailing comment is the version each SHA was at when pinned — bump both
+# together, never just the comment.
 jobs:
   build:
     strategy:
@@ -19,8 +31,8 @@ jobs:
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
           cache: npm
@@ -28,7 +40,7 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run ${{ matrix.script }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist-${{ matrix.os }}
           path: |
@@ -43,13 +55,28 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # gh release create
+      id-token: write # Sigstore OIDC, for the provenance signature
+      attestations: write # records the attestation against this repo
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           merge-multiple: true
+      # Signs a statement tying each installer's digest to this repo, this
+      # commit and this workflow run. electron-updater does not check it — it
+      # is what makes "did this binary really come from the release pipeline?"
+      # answerable after the fact, by anyone, with:
+      #   gh attestation verify <file> --repo Geptyro/uar-companion
+      # Only the installers are attested; the blockmaps and latest*.yml are
+      # updater metadata, already covered by the sha512 they carry.
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            artifacts/*.exe
+            artifacts/*.AppImage
+            artifacts/*-mac.zip
       - run: |
           gh release create "$GITHUB_REF_NAME" artifacts/* \
             --title "UAR Companion $GITHUB_REF_NAME" --generate-notes
